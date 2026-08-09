@@ -5,6 +5,8 @@
 Every feature unlocked. No $119–149/year "Pro" plan, no per-payment fees, no lock-in.
 Your data lives in a single SQLite file on your own machine.
 
+![Dashboard](docs/screenshots/dashboard.png)
+
 ## Features
 
 | Module | What it does |
@@ -23,6 +25,14 @@ Your data lives in a single SQLite file on your own machine.
 | **Condition reports** | 12-area move-in/move-out checklists that lock when completed |
 | **Accounting & Insights** | Approved payments auto-book as income; expenses by category; income-vs-expense chart; net profit |
 | **Resources** | Built-in guides, including how the paid platforms actually work under the hood |
+
+## Screenshots
+
+| | |
+|---|---|
+| **Payments** — tenant-reported payments queue for your one-click approval; past-due tracking is automatic ![Payments](docs/screenshots/payments.png) | **Tenant portal** — each tenant's private link: amount due, "I paid this" reporting, history, maintenance ![Tenant portal](docs/screenshots/portal.png) |
+| **Accounting & Insights** — approved payments auto-book as income; income vs expenses; net profit ![Accounting](docs/screenshots/accounting.png) | **Public listings** — prospects browse and apply online, featured properties pinned on top ![Listings](docs/screenshots/listings.png) |
+| **Application review** — income vs 3×-rent check, income verification, TransUnion SmartMove screening tracking ![Application detail](docs/screenshots/application-detail.png) | **Condition reports** — 12-area move-in/move-out checklists that lock when completed ![Condition report](docs/screenshots/condition-report.png) |
 
 ## Quick start
 
