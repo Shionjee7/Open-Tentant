@@ -15,12 +15,23 @@ import type {
   BankImport,
 } from "./types";
 
+/**
+ * node:sqlite hands back rows with a null prototype, which React refuses to
+ * serialize when a Server Component passes data to a Client Component. Copying
+ * each row into a plain object here means every query result is safe to pass
+ * anywhere, rather than blowing up only on the pages that cross that boundary.
+ */
+function plain<T>(row: unknown): T {
+  return { ...(row as Record<string, unknown>) } as T;
+}
+
 function all<T>(sql: string, ...params: (string | number)[]): T[] {
-  return getDb().prepare(sql).all(...params) as unknown as T[];
+  return (getDb().prepare(sql).all(...params) as unknown[]).map((row) => plain<T>(row));
 }
 
 function one<T>(sql: string, ...params: (string | number)[]): T | undefined {
-  return getDb().prepare(sql).get(...params) as unknown as T | undefined;
+  const row = getDb().prepare(sql).get(...params);
+  return row === undefined ? undefined : plain<T>(row);
 }
 
 // ---------- Properties ----------

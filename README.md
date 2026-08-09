@@ -33,8 +33,9 @@ file on your own machine.
 
 | | |
 |---|---|
+| **Banking & Deposits** — import a statement, and each deposit is matched to the tenant who paid ![Banking](docs/screenshots/banking.png) | **Rent by the room** — each room has its own rent, tenant, and listing ![Rooms](docs/screenshots/rooms.png) |
 | **Payments** — tenant-reported payments queue for one-click approval ![Payments](docs/screenshots/payments.png) | **Tenant portal** — balance due, "I paid this", history, maintenance ![Tenant portal](docs/screenshots/portal.png) |
-| **Accounting** — income vs expenses, categories, net profit ![Accounting](docs/screenshots/accounting.png) | **Public listings** — browse and apply online ![Listings](docs/screenshots/listings.png) |
+| **Accounting** — income vs expenses, categories, net profit ![Accounting](docs/screenshots/accounting.png) | **Public listings** — whole homes and single rooms, apply online ![Listings](docs/screenshots/listings.png) |
 | **Application review** — income check, verification, screening ![Application detail](docs/screenshots/application-detail.png) | **Condition reports** — move-in/move-out checklists ![Condition report](docs/screenshots/condition-report.png) |
 
 ## Quick start
