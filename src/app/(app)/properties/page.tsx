@@ -35,13 +35,25 @@ export default function PropertiesPage() {
                 <span>{p.beds} bd</span>·<span>{p.baths} ba</span>·<span>{p.sqft.toLocaleString()} sqft</span>
               </div>
               <div className="mt-3 flex items-center justify-between">
-                <span className="text-lg font-bold text-ink-900">{money(p.rent)}<span className="text-xs font-normal text-ink-500">/mo</span></span>
+                {p.rental_type === "by_room" ? (
+                  <span className="text-lg font-bold text-ink-900">
+                    {(p.room_count ?? 0) - (p.rooms_vacant ?? 0)}/{p.room_count ?? 0}
+                    <span className="text-xs font-normal text-ink-500"> rooms filled</span>
+                  </span>
+                ) : (
+                  <span className="text-lg font-bold text-ink-900">
+                    {money(p.rent)}<span className="text-xs font-normal text-ink-500">/mo</span>
+                  </span>
+                )}
                 <div className="flex gap-1.5">
                   {!!p.listed && <Badge value="active" label="Listed" />}
                   {!!p.priority_listing && <Badge value="screening" label="★ Priority" />}
                 </div>
               </div>
-              <div className="mt-2 text-xs text-ink-500">{titleCase(p.type)}</div>
+              <div className="mt-2 text-xs text-ink-500">
+                {titleCase(p.type)}
+                {p.rental_type === "by_room" && " · rented by the room"}
+              </div>
             </Link>
           ))}
         </div>

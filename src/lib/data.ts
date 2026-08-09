@@ -140,10 +140,13 @@ export function listApplications(): Application[] {
             p.first_name || ' ' || p.last_name AS applicant_name,
             p.email AS applicant_email,
             pr.name AS property_name,
-            pr.rent AS property_rent
+            pr.rent AS property_rent,
+            u.name AS unit_name,
+            u.rent AS unit_rent
      FROM applications a
      JOIN people p ON p.id = a.person_id
      LEFT JOIN properties pr ON pr.id = a.property_id
+     LEFT JOIN units u ON u.id = a.unit_id
      ORDER BY a.created_at DESC`
   );
 }
@@ -154,10 +157,13 @@ export function getApplication(id: number): Application | undefined {
             p.first_name || ' ' || p.last_name AS applicant_name,
             p.email AS applicant_email,
             pr.name AS property_name,
-            pr.rent AS property_rent
+            pr.rent AS property_rent,
+            u.name AS unit_name,
+            u.rent AS unit_rent
      FROM applications a
      JOIN people p ON p.id = a.person_id
      LEFT JOIN properties pr ON pr.id = a.property_id
+     LEFT JOIN units u ON u.id = a.unit_id
      WHERE a.id = ?`,
     id
   );
@@ -167,24 +173,26 @@ export function getApplication(id: number): Application | undefined {
 
 export function listLeases(): Lease[] {
   return all<Lease>(
-    `SELECT l.*, pr.name AS property_name,
+    `SELECT l.*, pr.name AS property_name, u.name AS unit_name,
             (SELECT group_concat(pe.first_name || ' ' || pe.last_name, ', ')
              FROM lease_tenants lt JOIN people pe ON pe.id = lt.person_id
              WHERE lt.lease_id = l.id) AS tenant_names
      FROM leases l
      JOIN properties pr ON pr.id = l.property_id
+     LEFT JOIN units u ON u.id = l.unit_id
      ORDER BY l.created_at DESC`
   );
 }
 
 export function getLease(id: number): Lease | undefined {
   return one<Lease>(
-    `SELECT l.*, pr.name AS property_name,
+    `SELECT l.*, pr.name AS property_name, u.name AS unit_name,
             (SELECT group_concat(pe.first_name || ' ' || pe.last_name, ', ')
              FROM lease_tenants lt JOIN people pe ON pe.id = lt.person_id
              WHERE lt.lease_id = l.id) AS tenant_names
      FROM leases l
      JOIN properties pr ON pr.id = l.property_id
+     LEFT JOIN units u ON u.id = l.unit_id
      WHERE l.id = ?`,
     id
   );
@@ -199,11 +207,12 @@ export function leaseTenantIds(leaseId: number): number[] {
 
 export function leasesExpiringWithin(days: number): Lease[] {
   return all<Lease>(
-    `SELECT l.*, pr.name AS property_name,
+    `SELECT l.*, pr.name AS property_name, u.name AS unit_name,
             (SELECT group_concat(pe.first_name || ' ' || pe.last_name, ', ')
              FROM lease_tenants lt JOIN people pe ON pe.id = lt.person_id
              WHERE lt.lease_id = l.id) AS tenant_names
      FROM leases l JOIN properties pr ON pr.id = l.property_id
+     LEFT JOIN units u ON u.id = l.unit_id
      WHERE l.status = 'active'
        AND date(l.end_date) BETWEEN date('now') AND date('now', '+' || ? || ' days')
      ORDER BY l.end_date`,
@@ -261,12 +270,13 @@ export function paymentsForPerson(personId: number): Payment[] {
 
 export function activeLeaseForPerson(personId: number): Lease | undefined {
   return one<Lease>(
-    `SELECT l.*, pr.name AS property_name,
+    `SELECT l.*, pr.name AS property_name, u.name AS unit_name,
             (SELECT group_concat(pe.first_name || ' ' || pe.last_name, ', ')
              FROM lease_tenants lt JOIN people pe ON pe.id = lt.person_id
              WHERE lt.lease_id = l.id) AS tenant_names
      FROM leases l
      JOIN properties pr ON pr.id = l.property_id
+     LEFT JOIN units u ON u.id = l.unit_id
      JOIN lease_tenants lt2 ON lt2.lease_id = l.id AND lt2.person_id = ?
      WHERE l.status IN ('active', 'signed', 'sent')
      ORDER BY l.start_date DESC LIMIT 1`,

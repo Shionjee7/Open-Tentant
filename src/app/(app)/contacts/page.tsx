@@ -88,7 +88,10 @@ export default async function ContactsPage({
                           <div>{p.email || "—"}</div>
                           <div className="text-xs text-ink-500">{p.phone}</div>
                         </td>
-                        <td className="td">{p.property_name ?? "—"}</td>
+                        <td className="td">
+                          {p.property_name ?? "—"}
+                          {p.unit_name && <div className="text-xs text-ink-500">{p.unit_name}</div>}
+                        </td>
                         <td className="td">{shortDate(p.created_at)}</td>
                         <td className="td text-right">
                           <div className="flex items-center justify-end gap-2">

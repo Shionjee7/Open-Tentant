@@ -36,7 +36,9 @@ export default async function PortalPage({
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Hi, {person.first_name} 👋</h1>
         <p className="mt-1 text-sm text-ink-500">
-          {person.property_name ? `Your home: ${person.property_name}` : "Your tenant portal"}
+          {person.property_name
+            ? `Your home: ${person.property_name}${person.unit_name ? ` · ${person.unit_name}` : ""}`
+            : "Your tenant portal"}
           {lease && ` · lease ${shortDate(lease.start_date)} → ${shortDate(lease.end_date)} · ${money(lease.rent)}/mo`}
         </p>
       </div>

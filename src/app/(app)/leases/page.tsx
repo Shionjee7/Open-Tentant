@@ -39,6 +39,7 @@ export default function LeasesPage() {
                     <Link href={`/leases/${l.id}`} className="font-medium text-brand-600 hover:underline">
                       {l.property_name}
                     </Link>
+                    {l.unit_name && <div className="text-xs text-ink-500">{l.unit_name}</div>}
                   </td>
                   <td className="td">{l.tenant_names ?? "—"}</td>
                   <td className="td">{shortDate(l.start_date)} → {shortDate(l.end_date)}</td>

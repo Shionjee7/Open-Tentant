@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getProperty, listLeases, listMaintenance, listPeople } from "@/lib/data";
+import { getProperty, listLeases, listMaintenance, listPeople, listUnits } from "@/lib/data";
 import { updateProperty } from "@/lib/actions";
 import { money, shortDate, titleCase } from "@/lib/format";
 import { Badge, BackLink, PageHeader } from "@/components/ui";
 import PropertyForm from "@/components/PropertyForm";
+import RoomsPanel from "@/components/RoomsPanel";
 
 export const metadata = { title: "Property" };
 
@@ -20,6 +21,12 @@ export default async function PropertyDetailPage({
   const leases = listLeases().filter((l) => l.property_id === property.id);
   const maintenance = listMaintenance().filter((m) => m.property_id === property.id);
   const tenants = listPeople("tenant").filter((p) => p.property_id === property.id);
+  const byRoom = property.rental_type === "by_room";
+  const rooms = byRoom ? listUnits(property.id) : [];
+  // Anyone who could move into a room: current tenants plus approved applicants.
+  const roomCandidates = byRoom
+    ? listPeople().filter((p) => p.stage === "tenant" || p.stage === "applicant")
+    : [];
 
   return (
     <>
@@ -41,12 +48,24 @@ export default async function PropertyDetailPage({
 
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
         <div className="card px-4 py-3">
-          <div className="text-xs font-semibold uppercase text-ink-500">Rent</div>
-          <div className="text-xl font-bold">{money(property.rent)}/mo</div>
+          <div className="text-xs font-semibold uppercase text-ink-500">
+            {byRoom ? "Rooms" : "Rent"}
+          </div>
+          <div className="text-xl font-bold">
+            {byRoom
+              ? `${rooms.filter((r) => r.status === "occupied").length}/${rooms.length} filled`
+              : `${money(property.rent)}/mo`}
+          </div>
         </div>
         <div className="card px-4 py-3">
-          <div className="text-xs font-semibold uppercase text-ink-500">Deposit</div>
-          <div className="text-xl font-bold">{money(property.deposit)}</div>
+          <div className="text-xs font-semibold uppercase text-ink-500">
+            {byRoom ? "Rent roll" : "Deposit"}
+          </div>
+          <div className="text-xl font-bold">
+            {byRoom
+              ? `${money(rooms.reduce((s, r) => s + (r.status === "occupied" ? r.rent : 0), 0))}/mo`
+              : money(property.deposit)}
+          </div>
         </div>
         <div className="card px-4 py-3">
           <div className="text-xs font-semibold uppercase text-ink-500">Layout</div>
@@ -57,6 +76,12 @@ export default async function PropertyDetailPage({
           <div className="text-xl font-bold">{titleCase(property.type)}</div>
         </div>
       </div>
+
+      {byRoom && (
+        <div className="mb-6">
+          <RoomsPanel property={property} rooms={rooms} candidates={roomCandidates} />
+        </div>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
         <div>

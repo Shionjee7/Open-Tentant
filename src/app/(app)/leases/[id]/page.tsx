@@ -31,7 +31,7 @@ export default async function LeaseDetailPage({
     <>
       <BackLink href="/leases" label="Leases" />
       <PageHeader
-        title={`Lease — ${lease.property_name}`}
+        title={`Lease — ${lease.property_name}${lease.unit_name ? ` · ${lease.unit_name}` : ""}`}
         subtitle={`${lease.tenant_names ?? "No tenants"} · ${shortDate(lease.start_date)} → ${shortDate(lease.end_date)}`}
         action={
           <div className="flex items-center gap-2">

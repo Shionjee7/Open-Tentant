@@ -35,7 +35,8 @@ export default function ApplicationsPage() {
             </thead>
             <tbody>
               {apps.map((a) => {
-                const ratio = a.property_rent ? a.monthly_income / a.property_rent : null;
+                const rent = a.unit_rent || a.property_rent;
+                const ratio = rent ? a.monthly_income / rent : null;
                 return (
                   <tr key={a.id} className="table-row">
                     <td className="td">
@@ -44,7 +45,12 @@ export default function ApplicationsPage() {
                       </Link>
                       <div className="text-xs text-ink-500">{a.applicant_email}</div>
                     </td>
-                    <td className="td">{a.property_name ?? "—"}</td>
+                    <td className="td">
+                      {a.property_name ?? "—"}
+                      {a.unit_name && (
+                        <div className="text-xs text-ink-500">{a.unit_name}</div>
+                      )}
+                    </td>
                     <td className="td">
                       <div>
                         {money(a.monthly_income)}/mo{" "}

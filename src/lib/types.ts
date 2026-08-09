@@ -73,6 +73,7 @@ export type Application = {
   id: number;
   person_id: number;
   property_id: number | null;
+  unit_id: number | null;
   status: "pending" | "screening" | "approved" | "denied";
   monthly_income: number;
   employer: string;
@@ -87,6 +88,8 @@ export type Application = {
   applicant_email?: string;
   property_name?: string;
   property_rent?: number;
+  unit_name?: string;
+  unit_rent?: number;
 };
 
 export type Lease = {
@@ -103,6 +106,7 @@ export type Lease = {
   notes: string;
   created_at: string;
   property_name?: string;
+  unit_name?: string;
   tenant_names?: string;
 };
 

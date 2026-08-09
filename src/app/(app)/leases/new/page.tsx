@@ -1,12 +1,14 @@
-import { listPeople, listProperties } from "@/lib/data";
+import { listAllUnits, listPeople, listProperties } from "@/lib/data";
 import { getSetting } from "@/lib/db";
 import { createLease } from "@/lib/actions";
 import { BackLink, PageHeader } from "@/components/ui";
+import LeasePropertyPicker from "@/components/LeasePropertyPicker";
 
 export const metadata = { title: "New lease" };
 
 export default function NewLeasePage() {
   const properties = listProperties();
+  const units = listAllUnits();
   const people = listPeople().filter((p) => p.stage === "tenant" || p.stage === "applicant");
   const defaultProvider = getSetting("esign_provider", "documenso");
 
@@ -19,14 +21,7 @@ export default function NewLeasePage() {
       />
       <form action={createLease} className="card max-w-3xl space-y-5 p-6">
         <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="label">Property</label>
-            <select name="property_id" required className="input">
-              {properties.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
+          <LeasePropertyPicker properties={properties} units={units} />
           <div>
             <label className="label">Status</label>
             <select name="status" defaultValue="draft" className="input">
@@ -43,14 +38,6 @@ export default function NewLeasePage() {
           <div>
             <label className="label">End date</label>
             <input name="end_date" type="date" required className="input" />
-          </div>
-          <div>
-            <label className="label">Monthly rent ($)</label>
-            <input name="rent" type="number" min="0" step="1" required className="input" />
-          </div>
-          <div>
-            <label className="label">Security deposit ($)</label>
-            <input name="deposit" type="number" min="0" step="1" className="input" />
           </div>
         </div>
 

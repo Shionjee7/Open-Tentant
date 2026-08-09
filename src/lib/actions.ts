@@ -32,8 +32,8 @@ export async function createProperty(form: FormData) {
   const db = getDb();
   const result = db
     .prepare(
-      `INSERT INTO properties (name, address, city, state, zip, type, beds, baths, sqft, rent, deposit, description, amenities, listed, priority_listing)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO properties (name, address, city, state, zip, type, beds, baths, sqft, rent, deposit, description, amenities, listed, priority_listing, rental_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       s(form, "name"),
@@ -50,17 +50,32 @@ export async function createProperty(form: FormData) {
       s(form, "description"),
       s(form, "amenities"),
       form.get("listed") ? 1 : 0,
-      form.get("priority_listing") ? 1 : 0
+      form.get("priority_listing") ? 1 : 0,
+      s(form, "rental_type") === "by_room" ? "by_room" : "whole"
     );
+  const propertyId = Number(result.lastInsertRowid);
+
+  // Renting by the room? Create the rooms right away so the property is usable.
+  if (s(form, "rental_type") === "by_room") {
+    const rooms = Math.max(0, Math.min(20, n(form, "room_count")));
+    const roomRent = n(form, "room_rent");
+    const insert = db.prepare(
+      "INSERT INTO units (property_id, name, rent, deposit, listed) VALUES (?, ?, ?, ?, 1)"
+    );
+    for (let i = 0; i < rooms; i++) {
+      insert.run(propertyId, `Room ${i + 1}`, roomRent, roomRent);
+    }
+  }
+
   refresh();
-  redirect(`/properties/${result.lastInsertRowid}`);
+  redirect(`/properties/${propertyId}`);
 }
 
 export async function updateProperty(form: FormData) {
   const id = n(form, "id");
   getDb()
     .prepare(
-      `UPDATE properties SET name=?, address=?, city=?, state=?, zip=?, type=?, beds=?, baths=?, sqft=?, rent=?, deposit=?, description=?, amenities=?, listed=?, priority_listing=?, status=?
+      `UPDATE properties SET name=?, address=?, city=?, state=?, zip=?, type=?, beds=?, baths=?, sqft=?, rent=?, deposit=?, description=?, amenities=?, listed=?, priority_listing=?, status=?, rental_type=?
        WHERE id=?`
     )
     .run(
@@ -80,10 +95,135 @@ export async function updateProperty(form: FormData) {
       form.get("listed") ? 1 : 0,
       form.get("priority_listing") ? 1 : 0,
       s(form, "status") || "vacant",
+      s(form, "rental_type") === "by_room" ? "by_room" : "whole",
       id
     );
   refresh();
   redirect(`/properties/${id}`);
+}
+
+// ---------- Rooms (units) ----------
+
+export async function createUnit(form: FormData) {
+  const propertyId = n(form, "property_id");
+  getDb()
+    .prepare(
+      `INSERT INTO units (property_id, name, rent, deposit, size_sqft, private_bath, furnished, listed, description)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      propertyId,
+      s(form, "name") || "Room",
+      n(form, "rent"),
+      n(form, "deposit"),
+      n(form, "size_sqft"),
+      form.get("private_bath") ? 1 : 0,
+      form.get("furnished") ? 1 : 0,
+      form.get("listed") ? 1 : 0,
+      s(form, "description")
+    );
+  syncPropertyOccupancy(propertyId);
+  refresh();
+  redirect(`/properties/${propertyId}`);
+}
+
+/** Adds several rooms at once — "this house has 4 bedrooms" in one step. */
+export async function addRooms(form: FormData) {
+  const propertyId = n(form, "property_id");
+  const count = Math.max(1, Math.min(20, n(form, "count")));
+  const rent = n(form, "rent");
+  const deposit = n(form, "deposit");
+  const db = getDb();
+  const existing = db
+    .prepare("SELECT COUNT(*) AS n FROM units WHERE property_id = ?")
+    .get(propertyId) as { n: number };
+  const insert = db.prepare(
+    "INSERT INTO units (property_id, name, rent, deposit, listed) VALUES (?, ?, ?, ?, 1)"
+  );
+  for (let i = 0; i < count; i++) {
+    insert.run(propertyId, `Room ${existing.n + i + 1}`, rent, deposit);
+  }
+  syncPropertyOccupancy(propertyId);
+  refresh();
+  redirect(`/properties/${propertyId}`);
+}
+
+export async function updateUnit(form: FormData) {
+  const propertyId = n(form, "property_id");
+  getDb()
+    .prepare(
+      `UPDATE units SET name=?, rent=?, deposit=?, size_sqft=?, private_bath=?, furnished=?, listed=?, description=?, status=?
+       WHERE id=?`
+    )
+    .run(
+      s(form, "name"),
+      n(form, "rent"),
+      n(form, "deposit"),
+      n(form, "size_sqft"),
+      form.get("private_bath") ? 1 : 0,
+      form.get("furnished") ? 1 : 0,
+      form.get("listed") ? 1 : 0,
+      s(form, "description"),
+      s(form, "status") || "vacant",
+      n(form, "id")
+    );
+  syncPropertyOccupancy(propertyId);
+  refresh();
+  redirect(`/properties/${propertyId}`);
+}
+
+export async function deleteUnit(form: FormData) {
+  const db = getDb();
+  const id = n(form, "id");
+  const propertyId = n(form, "property_id");
+  // Don't orphan people or leases pointing at this room.
+  db.prepare("UPDATE people SET unit_id = NULL WHERE unit_id = ?").run(id);
+  db.prepare("UPDATE leases SET unit_id = NULL WHERE unit_id = ?").run(id);
+  db.prepare("DELETE FROM units WHERE id = ?").run(id);
+  syncPropertyOccupancy(propertyId);
+  refresh();
+  redirect(`/properties/${propertyId}`);
+}
+
+/** Assigns (or clears) the tenant living in a room. */
+export async function assignRoomTenant(form: FormData) {
+  const db = getDb();
+  const unitId = n(form, "unit_id");
+  const propertyId = n(form, "property_id");
+  const personId = n(form, "person_id");
+
+  db.prepare("UPDATE people SET unit_id = NULL WHERE unit_id = ?").run(unitId);
+  if (personId) {
+    db.prepare(
+      "UPDATE people SET unit_id = ?, property_id = ?, stage = 'tenant' WHERE id = ?"
+    ).run(unitId, propertyId, personId);
+    db.prepare("UPDATE units SET status = 'occupied' WHERE id = ?").run(unitId);
+  } else {
+    db.prepare("UPDATE units SET status = 'vacant' WHERE id = ?").run(unitId);
+  }
+  syncPropertyOccupancy(propertyId);
+  refresh();
+  redirect(`/properties/${propertyId}`);
+}
+
+/**
+ * For a by-the-room property, the property counts as occupied when any room is
+ * taken, and vacant when every room is empty.
+ */
+function syncPropertyOccupancy(propertyId: number) {
+  if (!propertyId) return;
+  const db = getDb();
+  const property = db
+    .prepare("SELECT rental_type FROM properties WHERE id = ?")
+    .get(propertyId) as { rental_type: string } | undefined;
+  if (property?.rental_type !== "by_room") return;
+  const occupied = db
+    .prepare("SELECT COUNT(*) AS n FROM units WHERE property_id = ? AND status = 'occupied'")
+    .get(propertyId) as { n: number };
+  db.prepare("UPDATE properties SET status = ? WHERE id = ?").run(
+    occupied.n > 0 ? "occupied" : "vacant",
+    propertyId
+  );
 }
 
 export async function toggleListing(form: FormData) {
@@ -144,10 +284,11 @@ export async function archiveQuestion(form: FormData) {
 
 export async function submitApplication(form: FormData) {
   const db = getDb();
+  const unitId = n(form, "unit_id") || null;
   const person = db
     .prepare(
-      `INSERT INTO people (first_name, last_name, email, phone, stage, property_id, portal_token)
-       VALUES (?, ?, ?, ?, 'applicant', ?, ?)`
+      `INSERT INTO people (first_name, last_name, email, phone, stage, property_id, unit_id, portal_token)
+       VALUES (?, ?, ?, ?, 'applicant', ?, ?, ?)`
     )
     .run(
       s(form, "first_name"),
@@ -155,6 +296,7 @@ export async function submitApplication(form: FormData) {
       s(form, "email"),
       s(form, "phone"),
       n(form, "property_id") || null,
+      unitId,
       crypto.randomUUID()
     );
   const answers = listQuestions().map((q) => ({
@@ -162,11 +304,12 @@ export async function submitApplication(form: FormData) {
     answer: s(form, `q_${q.id}`),
   }));
   db.prepare(
-    `INSERT INTO applications (person_id, property_id, monthly_income, employer, move_in_date, answers)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT INTO applications (person_id, property_id, unit_id, monthly_income, employer, move_in_date, answers)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
     Number(person.lastInsertRowid),
     n(form, "property_id") || null,
+    unitId,
     n(form, "monthly_income"),
     s(form, "employer"),
     s(form, "move_in_date"),
@@ -183,10 +326,17 @@ export async function setApplicationStatus(form: FormData) {
   db.prepare("UPDATE applications SET status = ? WHERE id = ?").run(status, id);
   if (status === "approved") {
     const app = db
-      .prepare("SELECT person_id FROM applications WHERE id = ?")
-      .get(id) as { person_id: number } | undefined;
+      .prepare("SELECT person_id, property_id, unit_id FROM applications WHERE id = ?")
+      .get(id) as { person_id: number; property_id: number | null; unit_id: number | null } | undefined;
     if (app) {
-      db.prepare("UPDATE people SET stage = 'tenant' WHERE id = ?").run(app.person_id);
+      db.prepare(
+        "UPDATE people SET stage = 'tenant', property_id = ?, unit_id = ? WHERE id = ?"
+      ).run(app.property_id, app.unit_id, app.person_id);
+      // Approving for a specific room fills that room.
+      if (app.unit_id) {
+        db.prepare("UPDATE units SET status = 'occupied' WHERE id = ?").run(app.unit_id);
+        if (app.property_id) syncPropertyOccupancy(app.property_id);
+      }
     }
   }
   refresh();
@@ -219,11 +369,12 @@ export async function createLease(form: FormData) {
   const db = getDb();
   const result = db
     .prepare(
-      `INSERT INTO leases (property_id, start_date, end_date, rent, deposit, status, esign_provider, esign_url, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO leases (property_id, unit_id, start_date, end_date, rent, deposit, status, esign_provider, esign_url, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       n(form, "property_id"),
+      n(form, "unit_id") || null,
       s(form, "start_date"),
       s(form, "end_date"),
       n(form, "rent"),
@@ -252,23 +403,33 @@ export async function setLeaseStatus(form: FormData) {
   const id = n(form, "id");
   const status = s(form, "status");
   db.prepare("UPDATE leases SET status = ? WHERE id = ?").run(status, id);
-  const lease = db.prepare("SELECT property_id FROM leases WHERE id = ?").get(id) as
-    | { property_id: number }
+  const lease = db.prepare("SELECT property_id, unit_id FROM leases WHERE id = ?").get(id) as
+    | { property_id: number; unit_id: number | null }
     | undefined;
   if (lease) {
     if (status === "active") {
-      db.prepare("UPDATE properties SET status = 'occupied' WHERE id = ?").run(lease.property_id);
       db.prepare(
-        `UPDATE people SET stage = 'tenant', property_id = ?
+        `UPDATE people SET stage = 'tenant', property_id = ?, unit_id = ?
          WHERE id IN (SELECT person_id FROM lease_tenants WHERE lease_id = ?)`
-      ).run(lease.property_id, id);
+      ).run(lease.property_id, lease.unit_id, id);
+      if (lease.unit_id) {
+        db.prepare("UPDATE units SET status = 'occupied' WHERE id = ?").run(lease.unit_id);
+        syncPropertyOccupancy(lease.property_id);
+      } else {
+        db.prepare("UPDATE properties SET status = 'occupied' WHERE id = ?").run(lease.property_id);
+      }
     }
     if (status === "ended") {
-      db.prepare("UPDATE properties SET status = 'vacant' WHERE id = ?").run(lease.property_id);
       db.prepare(
-        `UPDATE people SET stage = 'past'
+        `UPDATE people SET stage = 'past', unit_id = NULL
          WHERE id IN (SELECT person_id FROM lease_tenants WHERE lease_id = ?)`
       ).run(id);
+      if (lease.unit_id) {
+        db.prepare("UPDATE units SET status = 'vacant' WHERE id = ?").run(lease.unit_id);
+        syncPropertyOccupancy(lease.property_id);
+      } else {
+        db.prepare("UPDATE properties SET status = 'vacant' WHERE id = ?").run(lease.property_id);
+      }
     }
   }
   refresh();

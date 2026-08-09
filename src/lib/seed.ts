@@ -53,6 +53,25 @@ export function seedDemoData() {
     ).lastInsertRowid
   );
 
+  // A house rented out room by room — the co-living / rent-by-the-room case.
+  const willow = Number(
+    insertProperty.run(
+      "Willow House (by the room)", "905 Willow Dr", "Columbus", "OH", "43206",
+      "single_family", 4, 2, 2100, 0, 0, "occupied", 1, 0,
+      "Rooms for rent in a shared 4-bedroom house. Utilities and wifi included.",
+      "Wifi Included, Utilities Included, Shared Kitchen, Laundry, Backyard"
+    ).lastInsertRowid
+  );
+  db.prepare("UPDATE properties SET rental_type = 'by_room' WHERE id = ?").run(willow);
+  const insertUnit = db.prepare(
+    `INSERT INTO units (property_id, name, rent, deposit, status, size_sqft, private_bath, furnished, listed, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+  );
+  const room1 = Number(insertUnit.run(willow, "Room 1 — Master", 850, 850, "occupied", 220, 1, 1, "Largest room, private ensuite bath.").lastInsertRowid);
+  const room2 = Number(insertUnit.run(willow, "Room 2", 700, 700, "occupied", 160, 0, 1, "Furnished, shared hall bath.").lastInsertRowid);
+  const room3 = Number(insertUnit.run(willow, "Room 3", 675, 675, "vacant", 150, 0, 1, "Bright corner room, available now.").lastInsertRowid);
+  const room4 = Number(insertUnit.run(willow, "Room 4", 650, 650, "vacant", 140, 0, 0, "Unfurnished, quiet side of the house.").lastInsertRowid);
+
   const insertPerson = db.prepare(
     `INSERT INTO people (first_name, last_name, email, phone, stage, property_id, notes, portal_token)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -77,6 +96,20 @@ export function seedDemoData() {
   insertPerson.run("Rita", "Alvarez", "rita.alv@example.com", "(614) 555-0110", "past", null,
     "Moved out of Cedar Duplex in good standing.", token());
 
+  // Room tenants at Willow House.
+  const insertRoomTenant = db.prepare(
+    `INSERT INTO people (first_name, last_name, email, phone, stage, property_id, unit_id, notes, portal_token)
+     VALUES (?, ?, ?, ?, 'tenant', ?, ?, ?, ?)`
+  );
+  const theo = Number(
+    insertRoomTenant.run("Theo", "Nguyen", "theo.n@example.com", "(614) 555-0134", willow, room1,
+      "Rents the master room.", token()).lastInsertRowid
+  );
+  const amara = Number(
+    insertRoomTenant.run("Amara", "Bello", "amara.b@example.com", "(614) 555-0156", willow, room2,
+      "Rents Room 2.", token()).lastInsertRowid
+  );
+
   const insertQuestion = db.prepare(
     "INSERT INTO custom_questions (question, type, required) VALUES (?, ?, ?)"
   );
@@ -100,8 +133,12 @@ export function seedDemoData() {
   );
 
   const insertLease = db.prepare(
-    `INSERT INTO leases (property_id, start_date, end_date, rent, deposit, status, esign_provider, esign_url)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO leases (property_id, unit_id, start_date, end_date, rent, deposit, status, esign_provider, esign_url)
+     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  const insertRoomLease = db.prepare(
+    `INSERT INTO leases (property_id, unit_id, start_date, end_date, rent, deposit, status, esign_provider, esign_url)
+     VALUES (?, ?, ?, ?, ?, ?, 'active', '', '')`
   );
   const mapleLease = Number(
     insertLease.run(maple, iso(monthsAgo(7, 1)), iso(monthsAgo(-5, 1)), 1850, 1850, "active", "documenso", "").lastInsertRowid
@@ -112,10 +149,19 @@ export function seedDemoData() {
   const cedarLease = Number(
     insertLease.run(cedar, iso(monthsAgo(-1, 1)), iso(monthsAgo(-13, 1)), 1450, 1450, "draft", "", "").lastInsertRowid
   );
+  const theoLease = Number(
+    insertRoomLease.run(willow, room1, iso(monthsAgo(4, 1)), iso(monthsAgo(-8, 1)), 850, 850).lastInsertRowid
+  );
+  const amaraLease = Number(
+    insertRoomLease.run(willow, room2, iso(monthsAgo(2, 1)), iso(monthsAgo(-10, 1)), 700, 700).lastInsertRowid
+  );
+
   const linkTenant = db.prepare("INSERT INTO lease_tenants (lease_id, person_id) VALUES (?, ?)");
   linkTenant.run(mapleLease, marcus);
   linkTenant.run(oakLease, dana);
   linkTenant.run(cedarLease, priya);
+  linkTenant.run(theoLease, theo);
+  linkTenant.run(amaraLease, amara);
 
   const insertPayment = db.prepare(
     `INSERT INTO payments (lease_id, person_id, amount, type, due_date, paid_date, method, status, notes)
@@ -158,6 +204,32 @@ export function seedDemoData() {
   const nextMonth = monthsAgo(-1, 1);
   insertPayment.run(mapleLease, marcus, 1850, "rent", iso(nextMonth), null, "", "unpaid", "");
   insertPayment.run(oakLease, dana, 1250, "rent", iso(nextMonth), null, "", "unpaid", "");
+
+  // Room rent at Willow House: paid history plus this month.
+  for (let m = 3; m >= 0; m--) {
+    const due = monthsAgo(m, 1);
+    if (m > 0) {
+      const paidTheo = monthsAgo(m, 1);
+      const p1 = Number(
+        insertPayment.run(theoLease, theo, 850, "rent", iso(due), iso(paidTheo), "ach", "paid", "").lastInsertRowid
+      );
+      insertTxn.run(willow, iso(paidTheo), "income", "rent", 850, "Rent — Willow House Room 1", p1);
+      if (m <= 2) {
+        const paidAmara = monthsAgo(m, 3);
+        const p2 = Number(
+          insertPayment.run(amaraLease, amara, 700, "rent", iso(due), iso(paidAmara), "venmo", "paid", "").lastInsertRowid
+        );
+        insertTxn.run(willow, iso(paidAmara), "income", "rent", 700, "Rent — Willow House Room 2", p2);
+      }
+    } else {
+      const paidTheo = monthsAgo(0, 2);
+      const p1 = Number(
+        insertPayment.run(theoLease, theo, 850, "rent", iso(due), iso(paidTheo), "ach", "paid", "").lastInsertRowid
+      );
+      insertTxn.run(willow, iso(paidTheo), "income", "rent", 850, "Rent — Willow House Room 1", p1);
+      insertPayment.run(amaraLease, amara, 700, "rent", iso(due), null, "", "unpaid", "");
+    }
+  }
 
   // Expenses.
   insertTxn.run(maple, iso(monthsAgo(4, 12)), "expense", "repairs", 320, "Water heater repair", null);

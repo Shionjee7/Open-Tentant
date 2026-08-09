@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getProperty, listQuestions } from "@/lib/data";
+import { getProperty, getUnit, listQuestions, listUnits } from "@/lib/data";
 import { submitApplication } from "@/lib/actions";
 import { money } from "@/lib/format";
 
@@ -7,26 +7,65 @@ export const metadata = { title: "Rental application" };
 
 export default async function ApplyPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ propertyId: string }>;
+  searchParams: Promise<{ room?: string }>;
 }) {
   const { propertyId } = await params;
+  const { room } = await searchParams;
   const property = getProperty(Number(propertyId));
   if (!property) notFound();
   const questions = listQuestions();
 
+  const byRoom = property.rental_type === "by_room";
+  const requestedRoom = room ? getUnit(Number(room)) : undefined;
+  // Only honor a room that really belongs to this property.
+  const unit = requestedRoom?.property_id === property.id ? requestedRoom : undefined;
+  const availableRooms = byRoom
+    ? listUnits(property.id).filter((u) => u.status === "vacant" && u.listed)
+    : [];
+
+  const rent = unit ? unit.rent : property.rent;
+  const deposit = unit ? unit.deposit : property.deposit;
+
   return (
     <div className="mx-auto max-w-2xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">Apply for {property.name}</h1>
+        <h1 className="text-2xl font-bold">
+          Apply for {unit ? `${unit.name} at ${property.name}` : property.name}
+        </h1>
         <p className="mt-1 text-sm text-ink-500">
-          {property.address}{property.city ? `, ${property.city}` : ""} · {money(property.rent)}/mo ·
-          deposit {money(property.deposit)}
+          {property.address}{property.city ? `, ${property.city}` : ""} · {money(rent)}/mo ·
+          deposit {money(deposit)}
         </p>
       </div>
 
       <form action={submitApplication} className="card space-y-5 p-6">
         <input type="hidden" name="property_id" value={property.id} />
+        {unit && <input type="hidden" name="unit_id" value={unit.id} />}
+
+        {byRoom && !unit && (
+          <div>
+            <label className="label">Which room?</label>
+            {availableRooms.length === 0 ? (
+              <p className="text-sm text-ink-500">
+                No rooms are available right now — you can still apply and we&apos;ll be in touch.
+              </p>
+            ) : (
+              <select name="unit_id" required className="input" defaultValue="">
+                <option value="" disabled>Choose a room…</option>
+                {availableRooms.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} — {money(u.rent)}/mo
+                    {u.private_bath ? " · private bath" : ""}
+                    {u.furnished ? " · furnished" : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="label">First name</label>

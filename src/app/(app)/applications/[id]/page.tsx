@@ -16,14 +16,15 @@ export default async function ApplicationDetailPage({
   if (!app) notFound();
 
   const answers: { question: string; answer: string }[] = JSON.parse(app.answers || "[]");
-  const ratio = app.property_rent ? app.monthly_income / app.property_rent : null;
+  const rent = app.unit_rent || app.property_rent;
+  const ratio = rent ? app.monthly_income / rent : null;
 
   return (
     <>
       <BackLink href="/applications" label="Applications" />
       <PageHeader
         title={`Application — ${app.applicant_name}`}
-        subtitle={`${app.property_name ?? "No property"} · applied ${shortDate(app.created_at)}`}
+        subtitle={`${app.property_name ?? "No property"}${app.unit_name ? ` · ${app.unit_name}` : ""} · applied ${shortDate(app.created_at)}`}
         action={<Badge value={app.status} />}
       />
 
@@ -91,7 +92,8 @@ export default async function ApplicationDetailPage({
               </form>
             </div>
             <p className="mt-2 text-xs text-ink-500">
-              Approving moves the applicant to your Tenants list. Next step: create a lease.
+              Approving moves the applicant to your Tenants list
+              {app.unit_name ? ` and assigns them to ${app.unit_name}` : ""}. Next step: create a lease.
             </p>
           </section>
 
