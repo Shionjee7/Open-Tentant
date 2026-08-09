@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #eef6ff;
+  --color-brand-100: #d9ecff;
+  --color-brand-500: #2f6fed;
+  --color-brand-600: #2258c9;
+  --color-brand-700: #1b46a3;
+  --color-ink-900: #101828;
+  --color-ink-700: #344054;
+  --color-ink-500: #667085;
+}
+
+body {
+  background-color: #f4f6fa;
+  color: var(--color-ink-900);
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+  }
+  .btn {
+    @apply inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-500/30;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+  .input {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/25;
+  }
+  .label {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-500;
+  }
+  .th {
+    @apply px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-ink-500;
+  }
+  .td {
+    @apply px-4 py-3 text-sm text-ink-700;
+  }
+  .table-row {
+    @apply border-t border-slate-100 hover:bg-slate-50/70;
+  }
+}
