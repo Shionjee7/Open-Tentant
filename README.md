@@ -1,9 +1,10 @@
 # OpenTenant 🏠
 
-**Free, open-source property management for landlords — a self-hosted alternative to TurboTenant.**
+**Free, open-source property management for landlords.**
 
-Every feature unlocked. No $119–149/year "Pro" plan, no per-payment fees, no lock-in.
-Your data lives in a single SQLite file on your own machine.
+Listings, applications, screening, leases, rent collection, maintenance, and accounting —
+self-hosted, with no subscription and no cut taken from rent. Your data lives in a single
+file on your own machine.
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
@@ -12,52 +13,56 @@ Your data lives in a single SQLite file on your own machine.
 | Module | What it does |
 |---|---|
 | **Dashboard** | Occupancy, active tenants & leases, collected this month/year, past due, open maintenance, expiring leases |
-| **Properties** | Full property records with rent, deposit, amenities, and listing controls |
-| **Public listings** | A marketing page (`/listings`) with online applications — ★ Priority/Featured pinning included (a paid feature elsewhere) |
+| **Properties** | Full property records with rent, deposit, amenities, and listing controls — plus **address autocomplete** that fills city, state, and ZIP |
+| **Rent by the room** | Rent a house room by room: each room has its own rent, deposit, tenant, lease, and listing |
+| **Public listings** | A marketing page (`/listings`) with online applications; vacant rooms list individually, and featured properties pin to the top |
 | **Leads & Tenants** | Pipeline from lead → applicant → tenant → past tenant, with one-click stage moves |
-| **Applications** | Online rental applications with **custom screening questions**, income vs 3×-rent check, and **income verification** (paid features elsewhere) |
-| **Tenant screening** | Track credit/criminal/eviction screening through TransUnion SmartMove or any FCRA agency — applicant pays the bureau, you pay nothing (see [docs/RESEARCH.md](docs/RESEARCH.md)) |
+| **Applications** | Online applications with **custom questions**, an automatic income-to-rent check, and income verification |
+| **Tenant screening** | Track credit/criminal/eviction screening through any FCRA bureau — the applicant pays, you pay nothing ([how it works](docs/HOW-IT-WORKS.md)) |
 | **Leases** | Draft → sent → signed → active → ended, with tenants attached and e-sign links |
-| **Payments** | Schedule rent up to 24 months ahead, record any payment method (Zelle, ACH, card, cash, check), automatic past-due tracking |
+| **Payments** | Schedule rent up to 24 months ahead, accept any method (Zelle, ACH, card, cash, check), automatic past-due tracking |
+| **Banking & Deposits** | Record which account each property's rent lands in, **import bank/Zelle/Cash App statements**, and assign each deposit to the tenant who paid — auto-suggested by amount, name, and due date |
 | **Tenant portal** | Private per-tenant link: balance due, **"I paid this"** reporting (you approve), payment history, maintenance requests |
 | **Maintenance** | Requests with priority and status workflow, from tenants or you |
 | **Documents & E-Sign** | Track documents through signing via open-source tools ([Documenso](https://documenso.com), [DocuSeal](https://www.docuseal.com), [OpenSign](https://www.opensignlabs.com)) |
 | **Condition reports** | 12-area move-in/move-out checklists that lock when completed |
 | **Accounting & Insights** | Approved payments auto-book as income; expenses by category; income-vs-expense chart; net profit |
-| **Resources** | Built-in guides, including how the paid platforms actually work under the hood |
+| **Resources** | Built-in guides for screening, rent collection, room rentals, and reconciliation |
 
 ## Screenshots
 
 | | |
 |---|---|
-| **Payments** — tenant-reported payments queue for your one-click approval; past-due tracking is automatic ![Payments](docs/screenshots/payments.png) | **Tenant portal** — each tenant's private link: amount due, "I paid this" reporting, history, maintenance ![Tenant portal](docs/screenshots/portal.png) |
-| **Accounting & Insights** — approved payments auto-book as income; income vs expenses; net profit ![Accounting](docs/screenshots/accounting.png) | **Public listings** — prospects browse and apply online, featured properties pinned on top ![Listings](docs/screenshots/listings.png) |
-| **Application review** — income vs 3×-rent check, income verification, TransUnion SmartMove screening tracking ![Application detail](docs/screenshots/application-detail.png) | **Condition reports** — 12-area move-in/move-out checklists that lock when completed ![Condition report](docs/screenshots/condition-report.png) |
+| **Payments** — tenant-reported payments queue for one-click approval ![Payments](docs/screenshots/payments.png) | **Tenant portal** — balance due, "I paid this", history, maintenance ![Tenant portal](docs/screenshots/portal.png) |
+| **Accounting** — income vs expenses, categories, net profit ![Accounting](docs/screenshots/accounting.png) | **Public listings** — browse and apply online ![Listings](docs/screenshots/listings.png) |
+| **Application review** — income check, verification, screening ![Application detail](docs/screenshots/application-detail.png) | **Condition reports** — move-in/move-out checklists ![Condition report](docs/screenshots/condition-report.png) |
 
 ## Quick start
 
-Requires **Node.js ≥ 22.13** (the database uses Node's built-in SQLite — zero native dependencies).
+Requires **Node.js ≥ 22.13** (the database uses Node's built-in SQLite — no native builds).
 
 ```bash
-git clone https://github.com/shionjee7/open-tentant.git
-cd open-tentant
-npm install
-npm run dev
+git clone https://github.com/Shionjee7/Open-Tentant.git
+cd Open-Tentant
+npm run setup
 ```
 
-Open http://localhost:3000 — click **Load demo data** to explore every module with sample
-records, or add your first property and start clean. The database is created automatically at
-`data/opentenant.db` (gitignored — back this file up and you've backed up everything).
+That installs, builds, and starts the app. Open http://localhost:3000 and click **Load demo
+data** to explore every module with sample records, or add your first property and start
+clean.
+
+For day-to-day development use `npm run dev` instead. The database is created automatically
+at `data/opentenant.db` — back up that file and you've backed up everything.
 
 ## Deploy it (get a real URL)
 
 See **[docs/DEPLOY.md](docs/DEPLOY.md)** for Render (one-click blueprint included), Railway,
 Fly.io, and plain Docker. Two things matter wherever you host it:
 
-- **Set `ADMIN_PASSWORD`** — this turns on the login gate for your dashboard. Without it the app
-  runs open, which is fine on your laptop and *not* fine on a public URL.
-- **Mount a persistent volume and point `DATA_DIR` at it** (e.g. `DATA_DIR=/var/data`) so your
-  data survives restarts.
+- **Set `ADMIN_PASSWORD`** — this turns on the login gate for your dashboard. Without it the
+  app runs open, which is fine on your laptop and *not* fine on a public URL.
+- **Mount a persistent volume and point `DATA_DIR` at it** (e.g. `DATA_DIR=/var/data`) so
+  your data survives restarts.
 
 With Docker on any server you own:
 
@@ -69,23 +74,21 @@ ADMIN_PASSWORD="a-long-random-password" docker compose up -d
 
 | Route | Access |
 |---|---|
-| `/`, `/properties`, `/payments`, `/accounting`, … | You — password required |
+| `/`, `/properties`, `/payments`, `/banking`, … | You — password required |
 | `/listings`, `/apply/[id]` | Public, by design (prospects browse and apply) |
 | `/portal/[token]` | The tenant holding that unguessable link |
 
-## How the "paid" features work here
+## Configuration
 
-- **Background checks** — no software can lawfully invent a credit/criminal/eviction report; they
-  must come from a consumer reporting agency (FCRA). TurboTenant resells TransUnion reports and the
-  *applicant* pays $45–55. You can use the same bureau directly via
-  [TransUnion SmartMove](https://www.mysmartmove.com): send an invite, the applicant pays ~$43–55
-  and authorizes, you get the report — OpenTenant tracks status, report link, and your decision.
-  Full research with sources: [docs/RESEARCH.md](docs/RESEARCH.md).
-- **Rent payments** — instead of a built-in processor charging 3.49% card / $2 ACH fees, you
-  configure whatever rails you already use (Zelle, Venmo, ACH, a Stripe payment link, cash, check).
-  Tenants report payments from their portal; you approve; income books itself into Accounting.
-- **E-signatures** — pair with a self-hosted open-source signing tool (Documenso, DocuSeal,
-  OpenSign) and track signing status on each document.
+Every setting is optional — the app runs with none of them.
+
+| Variable | What it does |
+|---|---|
+| `ADMIN_PASSWORD` | Enables the login gate. Required for any public deployment. |
+| `DATA_DIR` | Where the SQLite file lives. Point at your mounted volume. |
+| `PORT` | Port to listen on (default 3000). |
+| `GEOCODER_URL` | Your own Nominatim/Photon instance for address autocomplete. |
+| `GEOCODER_CONTACT` | Contact string sent with geocoding requests. |
 
 ## Tech stack
 
@@ -94,19 +97,23 @@ ADMIN_PASSWORD="a-long-random-password" docker compose up -d
 - SQLite via Node's built-in `node:sqlite` — no ORM, no native builds, transparent SQL
 - TypeScript
 
+Everything it depends on is free and open source. Schema changes migrate automatically on
+startup, so upgrading is `git pull` with no manual steps.
+
 ## Roadmap
 
 - [ ] Multi-user auth (multiple landlord accounts; today it's a single shared password)
 - [ ] Email notifications (rent reminders, application received, maintenance updates)
-- [ ] Stripe/PayPal integration for true in-app card & ACH payments
-- [ ] Direct e-sign API integration (Documenso/DocuSeal APIs) instead of pasted links
+- [ ] Optional Stripe integration for in-app card & ACH payments
+- [ ] Direct e-sign API integration instead of pasted links
 - [ ] File uploads (lease PDFs, maintenance photos, condition-report photos)
-- [ ] Listing syndication feeds (Zillow/Zumper formats)
+- [ ] Native PDF statement parsing (today: paste the text, or import CSV)
+- [ ] Listing syndication feeds
 - [ ] Rent reporting to credit bureaus
-- [ ] Multi-unit buildings (units as first-class records)
 - [ ] Postgres option for larger portfolios
 
-Contributions welcome — this project exists so no landlord has to pay rent on their own software.
+Contributions welcome — this project exists so no landlord has to pay rent on their own
+software.
 
 ## License
 

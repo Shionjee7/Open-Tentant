@@ -2,12 +2,13 @@
   "name": "opentenant",
   "version": "0.1.0",
   "private": true,
-  "description": "Open-source property management software — a free, self-hosted alternative to TurboTenant for landlords and property managers.",
+  "description": "Open-source property management software for landlords — listings, applications, screening, leases, rent collection, maintenance, and accounting. Free and self-hosted.",
   "license": "MIT",
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

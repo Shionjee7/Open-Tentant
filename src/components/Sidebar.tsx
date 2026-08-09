@@ -10,6 +10,7 @@ const NAV: { href: string; label: string; icon: string }[] = [
   { href: "/applications", label: "Applications", icon: "✎" },
   { href: "/leases", label: "Leases", icon: "§" },
   { href: "/payments", label: "Payments", icon: "$" },
+  { href: "/banking", label: "Banking & Deposits", icon: "≡" },
   { href: "/maintenance", label: "Maintenance", icon: "⚒" },
   { href: "/documents", label: "Documents & E-Sign", icon: "✍" },
   { href: "/condition-reports", label: "Condition Reports", icon: "☑" },

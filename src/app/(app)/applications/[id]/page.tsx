@@ -113,14 +113,13 @@ export default async function ApplicationDetailPage({
           <section className="card p-5">
             <h2 className="mb-1 flex items-center gap-2 font-semibold">Tenant screening <ProBadge /></h2>
             <p className="mb-3 text-xs text-ink-500">
-              Credit, criminal, and eviction reports must come from a consumer reporting agency —
-              that&apos;s how TurboTenant does it too (they resell TransUnion). Invite the applicant
-              through{" "}
+              Credit, criminal, and eviction reports must come from a consumer reporting agency
+              (FCRA). Invite the applicant through{" "}
               <a href="https://www.mysmartmove.com" target="_blank" className="text-brand-600 hover:underline">
                 TransUnion SmartMove
               </a>{" "}
-              (applicant pays ~$43–55, you pay nothing, you never see their SSN), then track the
-              result here. See Resources for details.
+              or a similar bureau — the applicant pays (~$43–55), you pay nothing, and you never see
+              their SSN — then track the result here. See Resources for details.
             </p>
             <form action={setScreening} className="space-y-3">
               <input type="hidden" name="id" value={app.id} />

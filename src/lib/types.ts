@@ -183,6 +183,34 @@ export type ConditionReport = {
   property_name?: string;
 };
 
+export type BankAccount = {
+  id: number;
+  name: string;
+  institution: string;
+  last4: string;
+  kind: "bank" | "zelle" | "cashapp" | "venmo" | "paypal" | "other";
+  property_id: number | null;
+  notes: string;
+  created_at: string;
+  property_name?: string;
+};
+
+export type BankImport = {
+  id: number;
+  account_id: number | null;
+  posted_date: string;
+  description: string;
+  amount: number;
+  source: string;
+  status: "unmatched" | "matched" | "ignored";
+  payment_id: number | null;
+  person_id: number | null;
+  fingerprint: string;
+  created_at: string;
+  account_name?: string;
+  matched_tenant?: string;
+};
+
 export type ConditionItem = {
   area: string;
   condition: "good" | "fair" | "poor" | "";

@@ -282,6 +282,27 @@ export function seedDemoData() {
      VALUES (?, ?, 'move_in', 'draft', '[]', 'To complete before Priya moves in.')`
   ).run(cedar, cedarLease);
 
+  const insertAccount = db.prepare(
+    `INSERT INTO bank_accounts (name, institution, last4, kind, property_id, notes)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  const rentChecking = Number(
+    insertAccount.run("Rent checking", "First National", "4821", "bank", null,
+      "Main account — most rent lands here.").lastInsertRowid
+  );
+  insertAccount.run("Zelle (personal)", "First National", "4821", "zelle", oak,
+    "Oakwood tenants pay by Zelle.");
+  insertAccount.run("Willow House account", "Credit Union", "2210", "bank", willow,
+    "Room rent for the shared house.");
+
+  // Two deposits waiting to be matched, so the review flow has something in it.
+  const insertImport = db.prepare(
+    `INSERT INTO bank_imports (account_id, posted_date, description, amount, source, status, fingerprint)
+     VALUES (?, ?, ?, ?, ?, 'unmatched', ?)`
+  );
+  insertImport.run(rentChecking, iso(monthsAgo(0, 4)), "ZELLE FROM MARCUS WEBB SEPT RENT", 1850, "zelle", "demo-1");
+  insertImport.run(rentChecking, iso(monthsAgo(0, 5)), "ACH DEPOSIT — CITY UTILITY REFUND", 63.4, "bank", "demo-2");
+
   setSetting("business_name", "Demo Property Management");
   setSetting("payment_methods", "ACH transfer, Zelle, Venmo, Check");
   setSetting(

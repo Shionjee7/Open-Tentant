@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getDb, setSetting } from "./db";
 import { listQuestions } from "./data";
 import { seedDemoData } from "./seed";
+import { fingerprint, parseStatement } from "./statements";
 
 function s(form: FormData, key: string): string {
   return String(form.get(key) ?? "").trim();
@@ -592,6 +593,177 @@ export async function rejectReportedPayment(form: FormData) {
        WHERE id = ? AND status = 'reported'`
     )
     .run(n(form, "id"));
+  refresh();
+}
+
+// ---------- Bank accounts & statement import ----------
+
+export async function createBankAccount(form: FormData) {
+  getDb()
+    .prepare(
+      `INSERT INTO bank_accounts (name, institution, last4, kind, property_id, notes)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      s(form, "name"),
+      s(form, "institution"),
+      s(form, "last4").replace(/\D/g, "").slice(-4),
+      s(form, "kind") || "bank",
+      n(form, "property_id") || null,
+      s(form, "notes")
+    );
+  refresh();
+  redirect("/banking");
+}
+
+export async function deleteBankAccount(form: FormData) {
+  const db = getDb();
+  const id = n(form, "id");
+  db.prepare("UPDATE bank_imports SET account_id = NULL WHERE account_id = ?").run(id);
+  db.prepare("DELETE FROM bank_accounts WHERE id = ?").run(id);
+  refresh();
+}
+
+/**
+ * Reads a pasted or uploaded statement and stores the deposits for review.
+ * Rows already imported are skipped, so re-importing a file is harmless.
+ */
+export async function importStatement(form: FormData) {
+  const accountId = n(form, "account_id") || null;
+  const source = s(form, "source") || "bank";
+  const depositsOnly = form.get("deposits_only") !== null;
+
+  let text = s(form, "statement_text");
+  const file = form.get("statement_file");
+  if (file instanceof File && file.size > 0) {
+    text = `${await file.text()}\n${text}`;
+  }
+  if (!text.trim()) {
+    redirect("/banking?error=empty");
+  }
+
+  const rows = parseStatement(text);
+  if (rows.length === 0) {
+    redirect("/banking?error=unparsed");
+  }
+
+  const db = getDb();
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO bank_imports (account_id, posted_date, description, amount, source, fingerprint)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  let imported = 0;
+  let skipped = 0;
+  for (const row of rows) {
+    // Money going out isn't rent coming in.
+    if (depositsOnly && row.amount <= 0) {
+      skipped++;
+      continue;
+    }
+    const result = insert.run(
+      accountId,
+      row.posted_date,
+      row.description,
+      row.amount,
+      source,
+      fingerprint(accountId ?? 0, row)
+    );
+    if (result.changes > 0) imported++;
+    else skipped++;
+  }
+
+  refresh();
+  redirect(`/banking?imported=${imported}&skipped=${skipped}`);
+}
+
+/** Links a deposit to a scheduled payment: marks it paid and books the income. */
+export async function matchImport(form: FormData) {
+  const db = getDb();
+  const importId = n(form, "id");
+  const paymentId = n(form, "payment_id");
+  if (!paymentId) return;
+
+  const deposit = db
+    .prepare("SELECT posted_date, amount, source, description FROM bank_imports WHERE id = ?")
+    .get(importId) as
+    | { posted_date: string; amount: number; source: string; description: string }
+    | undefined;
+  if (!deposit) return;
+
+  const payment = db
+    .prepare(
+      `SELECT pay.id, pay.amount, pay.type, pay.person_id, l.property_id
+       FROM payments pay LEFT JOIN leases l ON l.id = pay.lease_id
+       WHERE pay.id = ?`
+    )
+    .get(paymentId) as
+    | { id: number; amount: number; type: string; person_id: number | null; property_id: number | null }
+    | undefined;
+  if (!payment) return;
+
+  db.prepare("UPDATE payments SET status = 'paid', paid_date = ?, method = ? WHERE id = ?").run(
+    deposit.posted_date,
+    deposit.source,
+    paymentId
+  );
+  db.prepare(
+    `INSERT INTO transactions (property_id, date, type, category, amount, description, payment_id)
+     VALUES (?, ?, 'income', ?, ?, ?, ?)`
+  ).run(
+    payment.property_id,
+    deposit.posted_date,
+    payment.type === "rent" ? "rent" : payment.type,
+    deposit.amount,
+    `Bank deposit matched — ${deposit.description}`.slice(0, 200),
+    paymentId
+  );
+  db.prepare(
+    "UPDATE bank_imports SET status = 'matched', payment_id = ?, person_id = ? WHERE id = ?"
+  ).run(paymentId, payment.person_id, importId);
+
+  refresh();
+}
+
+/** Records a deposit as income without tying it to a scheduled payment. */
+export async function bookImportAsIncome(form: FormData) {
+  const db = getDb();
+  const importId = n(form, "id");
+  const deposit = db
+    .prepare("SELECT posted_date, amount, description FROM bank_imports WHERE id = ?")
+    .get(importId) as { posted_date: string; amount: number; description: string } | undefined;
+  if (!deposit) return;
+
+  db.prepare(
+    `INSERT INTO transactions (property_id, date, type, category, amount, description)
+     VALUES (?, ?, 'income', ?, ?, ?)`
+  ).run(
+    n(form, "property_id") || null,
+    deposit.posted_date,
+    s(form, "category") || "other",
+    deposit.amount,
+    `Bank deposit — ${deposit.description}`.slice(0, 200)
+  );
+  db.prepare("UPDATE bank_imports SET status = 'matched' WHERE id = ?").run(importId);
+  refresh();
+}
+
+export async function ignoreImport(form: FormData) {
+  getDb().prepare("UPDATE bank_imports SET status = 'ignored' WHERE id = ?").run(n(form, "id"));
+  refresh();
+}
+
+export async function unignoreImport(form: FormData) {
+  getDb()
+    .prepare("UPDATE bank_imports SET status = 'unmatched' WHERE id = ?")
+    .run(n(form, "id"));
+  refresh();
+}
+
+export async function clearImports(form: FormData) {
+  const status = s(form, "status");
+  if (status === "ignored" || status === "matched") {
+    getDb().prepare("DELETE FROM bank_imports WHERE status = ?").run(status);
+  }
   refresh();
 }
 

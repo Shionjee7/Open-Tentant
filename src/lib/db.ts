@@ -157,6 +157,38 @@ CREATE TABLE IF NOT EXISTS documents (
   signed_at TEXT
 );
 
+-- Where each property's rent lands. A property with no account here just
+-- falls back to whatever the landlord's default is.
+CREATE TABLE IF NOT EXISTS bank_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  institution TEXT NOT NULL DEFAULT '',
+  last4 TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'bank',
+  property_id INTEGER,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Deposits imported from a statement, before and after they are matched to a
+-- tenant's payment. Keeps a fingerprint so re-importing the same file is safe.
+CREATE TABLE IF NOT EXISTS bank_imports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER,
+  posted_date TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  amount REAL NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'bank',
+  status TEXT NOT NULL DEFAULT 'unmatched',
+  payment_id INTEGER,
+  person_id INTEGER,
+  fingerprint TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_imports_fingerprint
+  ON bank_imports(fingerprint) WHERE fingerprint <> '';
+
 CREATE TABLE IF NOT EXISTS condition_reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   property_id INTEGER NOT NULL,

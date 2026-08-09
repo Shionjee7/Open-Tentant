@@ -11,6 +11,8 @@ import type {
   Property,
   Txn,
   Unit,
+  BankAccount,
+  BankImport,
 } from "./types";
 
 function all<T>(sql: string, ...params: (string | number)[]): T[] {
@@ -312,6 +314,35 @@ export function sumPastDue(): number {
      WHERE status = 'unpaid' AND date(due_date) < date('now')`
   );
   return row?.total ?? 0;
+}
+
+/** Every payment still awaiting money — the pool we match bank deposits against. */
+export function openPayments(): Payment[] {
+  return all<Payment>(
+    `${PAYMENT_SELECT} WHERE pay.status IN ('unpaid','reported') ORDER BY pay.due_date DESC`
+  );
+}
+
+// ---------- Bank accounts & statement imports ----------
+
+export function listBankAccounts(): BankAccount[] {
+  return all<BankAccount>(
+    `SELECT b.*, pr.name AS property_name
+     FROM bank_accounts b LEFT JOIN properties pr ON pr.id = b.property_id
+     ORDER BY b.created_at`
+  );
+}
+
+export function listBankImports(status?: string): BankImport[] {
+  const base = `
+    SELECT bi.*, ba.name AS account_name,
+           pe.first_name || ' ' || pe.last_name AS matched_tenant
+    FROM bank_imports bi
+    LEFT JOIN bank_accounts ba ON ba.id = bi.account_id
+    LEFT JOIN people pe ON pe.id = bi.person_id`;
+  return status
+    ? all<BankImport>(`${base} WHERE bi.status = ? ORDER BY bi.posted_date DESC`, status)
+    : all<BankImport>(`${base} ORDER BY bi.posted_date DESC`);
 }
 
 // ---------- Maintenance ----------
