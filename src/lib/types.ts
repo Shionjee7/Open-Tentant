@@ -16,7 +16,33 @@ export type Property = {
   priority_listing: number;
   description: string;
   amenities: string;
+  /** "whole" = rent the entire place; "by_room" = rent each room separately. */
+  rental_type: "whole" | "by_room";
   created_at: string;
+  room_count?: number;
+  rooms_vacant?: number;
+};
+
+/** A room inside a property, when renting by the room. */
+export type Unit = {
+  id: number;
+  property_id: number;
+  name: string;
+  rent: number;
+  deposit: number;
+  status: "vacant" | "occupied";
+  size_sqft: number;
+  private_bath: number;
+  furnished: number;
+  listed: number;
+  description: string;
+  created_at: string;
+  property_name?: string;
+  property_city?: string;
+  property_state?: string;
+  property_address?: string;
+  property_amenities?: string;
+  tenant_names?: string;
 };
 
 export type Person = {
@@ -27,10 +53,12 @@ export type Person = {
   phone: string;
   stage: "lead" | "applicant" | "tenant" | "past";
   property_id: number | null;
+  unit_id: number | null;
   notes: string;
   portal_token: string;
   created_at: string;
   property_name?: string;
+  unit_name?: string;
 };
 
 export type CustomQuestion = {
@@ -64,6 +92,7 @@ export type Application = {
 export type Lease = {
   id: number;
   property_id: number;
+  unit_id: number | null;
   start_date: string;
   end_date: string;
   rent: number;

@@ -10,6 +10,7 @@ import type {
   Person,
   Property,
   Txn,
+  Unit,
 } from "./types";
 
 function all<T>(sql: string, ...params: (string | number)[]): T[] {
@@ -22,25 +23,69 @@ function one<T>(sql: string, ...params: (string | number)[]): T | undefined {
 
 // ---------- Properties ----------
 
+const PROPERTY_SELECT = `
+  SELECT p.*,
+         (SELECT COUNT(*) FROM units u WHERE u.property_id = p.id) AS room_count,
+         (SELECT COUNT(*) FROM units u WHERE u.property_id = p.id AND u.status = 'vacant') AS rooms_vacant
+  FROM properties p`;
+
 export function listProperties(): Property[] {
-  return all<Property>("SELECT * FROM properties ORDER BY created_at DESC");
+  return all<Property>(`${PROPERTY_SELECT} ORDER BY p.created_at DESC`);
 }
 
 export function listedProperties(): Property[] {
   return all<Property>(
-    "SELECT * FROM properties WHERE listed = 1 ORDER BY priority_listing DESC, created_at DESC"
+    `${PROPERTY_SELECT}
+     WHERE p.listed = 1 AND p.rental_type = 'whole'
+     ORDER BY p.priority_listing DESC, p.created_at DESC`
   );
 }
 
 export function getProperty(id: number): Property | undefined {
-  return one<Property>("SELECT * FROM properties WHERE id = ?", id);
+  return one<Property>(`${PROPERTY_SELECT} WHERE p.id = ?`, id);
+}
+
+// ---------- Rooms (units) ----------
+
+const UNIT_SELECT = `
+  SELECT u.*,
+         p.name AS property_name,
+         p.address AS property_address,
+         p.city AS property_city,
+         p.state AS property_state,
+         p.amenities AS property_amenities,
+         (SELECT group_concat(pe.first_name || ' ' || pe.last_name, ', ')
+          FROM people pe WHERE pe.unit_id = u.id AND pe.stage = 'tenant') AS tenant_names
+  FROM units u JOIN properties p ON p.id = u.property_id`;
+
+export function listUnits(propertyId: number): Unit[] {
+  return all<Unit>(`${UNIT_SELECT} WHERE u.property_id = ? ORDER BY u.id`, propertyId);
+}
+
+export function getUnit(id: number): Unit | undefined {
+  return one<Unit>(`${UNIT_SELECT} WHERE u.id = ?`, id);
+}
+
+export function listAllUnits(): Unit[] {
+  return all<Unit>(`${UNIT_SELECT} ORDER BY p.name, u.id`);
+}
+
+/** Vacant, listed rooms in by-the-room properties — shown individually on the listings page. */
+export function listedRooms(): Unit[] {
+  return all<Unit>(
+    `${UNIT_SELECT}
+     WHERE p.listed = 1 AND p.rental_type = 'by_room' AND u.listed = 1 AND u.status = 'vacant'
+     ORDER BY p.priority_listing DESC, p.name, u.id`
+  );
 }
 
 // ---------- People ----------
 
 export function listPeople(stage?: string): Person[] {
-  const base = `SELECT p.*, pr.name AS property_name
-     FROM people p LEFT JOIN properties pr ON pr.id = p.property_id`;
+  const base = `SELECT p.*, pr.name AS property_name, u.name AS unit_name
+     FROM people p
+     LEFT JOIN properties pr ON pr.id = p.property_id
+     LEFT JOIN units u ON u.id = p.unit_id`;
   if (stage) {
     return all<Person>(`${base} WHERE p.stage = ? ORDER BY p.created_at DESC`, stage);
   }
@@ -49,8 +94,10 @@ export function listPeople(stage?: string): Person[] {
 
 export function getPerson(id: number): Person | undefined {
   return one<Person>(
-    `SELECT p.*, pr.name AS property_name
-     FROM people p LEFT JOIN properties pr ON pr.id = p.property_id
+    `SELECT p.*, pr.name AS property_name, u.name AS unit_name
+     FROM people p
+     LEFT JOIN properties pr ON pr.id = p.property_id
+     LEFT JOIN units u ON u.id = p.unit_id
      WHERE p.id = ?`,
     id
   );
@@ -59,8 +106,10 @@ export function getPerson(id: number): Person | undefined {
 export function getPersonByToken(token: string): Person | undefined {
   if (!token) return undefined;
   return one<Person>(
-    `SELECT p.*, pr.name AS property_name
-     FROM people p LEFT JOIN properties pr ON pr.id = p.property_id
+    `SELECT p.*, pr.name AS property_name, u.name AS unit_name
+     FROM people p
+     LEFT JOIN properties pr ON pr.id = p.property_id
+     LEFT JOIN units u ON u.id = p.unit_id
      WHERE p.portal_token = ?`,
     token
   );

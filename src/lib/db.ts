@@ -29,6 +29,23 @@ CREATE TABLE IF NOT EXISTS properties (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Rooms inside a property, for renting a house out by the room.
+-- A property rented as a whole simply has no rooms.
+CREATE TABLE IF NOT EXISTS units (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  property_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  rent REAL NOT NULL DEFAULT 0,
+  deposit REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'vacant',
+  size_sqft INTEGER NOT NULL DEFAULT 0,
+  private_bath INTEGER NOT NULL DEFAULT 0,
+  furnished INTEGER NOT NULL DEFAULT 0,
+  listed INTEGER NOT NULL DEFAULT 1,
+  description TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS people (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   first_name TEXT NOT NULL,
@@ -153,6 +170,27 @@ CREATE TABLE IF NOT EXISTS condition_reports (
 );
 `;
 
+/**
+ * Columns added after the first release. Existing databases get them via
+ * ALTER TABLE on startup, so upgrading is just `git pull` — no manual steps.
+ */
+const MIGRATIONS: [table: string, column: string, ddl: string][] = [
+  ["properties", "rental_type", "TEXT NOT NULL DEFAULT 'whole'"],
+  ["people", "unit_id", "INTEGER"],
+  ["leases", "unit_id", "INTEGER"],
+  ["applications", "unit_id", "INTEGER"],
+  ["maintenance_requests", "unit_id", "INTEGER"],
+];
+
+function migrate(db: DatabaseSync) {
+  for (const [table, column, ddl] of MIGRATIONS) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!columns.some((c) => c.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+    }
+  }
+}
+
 declare global {
   // eslint-disable-next-line no-var
   var __opentenant_db: DatabaseSync | undefined;
@@ -177,6 +215,7 @@ export function getDb(): DatabaseSync {
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
+  migrate(db);
   globalThis.__opentenant_db = db;
   return db;
 }
