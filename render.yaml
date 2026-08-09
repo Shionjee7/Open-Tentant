@@ -1,0 +1,34 @@
+# Render Blueprint — deploy OpenTenant with one click.
+# In Render: New → Blueprint → connect this repo. Render reads this file.
+#
+# This uses Render's Node runtime (the same npm build/start path you run
+# locally). A Dockerfile is also included if you prefer container deploys —
+# see docs/DEPLOY.md.
+#
+# IMPORTANT: the `disk` below keeps your database between restarts and deploys.
+# Disks require a paid instance type. On Render's free tier the filesystem is
+# ephemeral, so remove the `disk:` block to try it out — but know that your data
+# resets whenever the service restarts.
+services:
+  - type: web
+    name: opentenant
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /listings
+    envVars:
+      # node:sqlite (the database) requires Node 22.13 or newer.
+      - key: NODE_VERSION
+        value: "22"
+      # Keep the database on the mounted disk below, not the ephemeral filesystem.
+      - key: DATA_DIR
+        value: /var/data
+      # Render generates a strong password for you. Find it under the service's
+      # Environment tab and use it to sign in.
+      - key: ADMIN_PASSWORD
+        generateValue: true
+    disk:
+      name: opentenant-data
+      mountPath: /var/data
+      sizeGB: 1

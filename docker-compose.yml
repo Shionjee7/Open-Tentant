@@ -1,0 +1,9 @@
+services:
+  opentenant:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # Your database lives here. Back up this folder and you've backed up everything.
+      - ./data:/app/data
+    restart: unless-stopped

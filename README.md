@@ -49,9 +49,29 @@ Open http://localhost:3000 — click **Load demo data** to explore every module 
 records, or add your first property and start clean. The database is created automatically at
 `data/opentenant.db` (gitignored — back this file up and you've backed up everything).
 
-For production: `npm run build && npm start`, put it behind any reverse proxy, and restrict access
-to the app routes (the `/listings`, `/apply/*`, and `/portal/*` routes are the only ones meant to
-be public — see Roadmap for built-in auth).
+## Deploy it (get a real URL)
+
+See **[docs/DEPLOY.md](docs/DEPLOY.md)** for Render (one-click blueprint included), Railway,
+Fly.io, and plain Docker. Two things matter wherever you host it:
+
+- **Set `ADMIN_PASSWORD`** — this turns on the login gate for your dashboard. Without it the app
+  runs open, which is fine on your laptop and *not* fine on a public URL.
+- **Mount a persistent volume and point `DATA_DIR` at it** (e.g. `DATA_DIR=/var/data`) so your
+  data survives restarts.
+
+With Docker on any server you own:
+
+```bash
+ADMIN_PASSWORD="a-long-random-password" docker compose up -d
+```
+
+### Who can reach what
+
+| Route | Access |
+|---|---|
+| `/`, `/properties`, `/payments`, `/accounting`, … | You — password required |
+| `/listings`, `/apply/[id]` | Public, by design (prospects browse and apply) |
+| `/portal/[token]` | The tenant holding that unguessable link |
 
 ## How the "paid" features work here
 
@@ -76,7 +96,7 @@ be public — see Roadmap for built-in auth).
 
 ## Roadmap
 
-- [ ] Multi-user auth (landlord accounts, tenant logins beyond magic links)
+- [ ] Multi-user auth (multiple landlord accounts; today it's a single shared password)
 - [ ] Email notifications (rent reminders, application received, maintenance updates)
 - [ ] Stripe/PayPal integration for true in-app card & ACH payments
 - [ ] Direct e-sign API integration (Documenso/DocuSeal APIs) instead of pasted links

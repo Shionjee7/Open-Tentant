@@ -158,9 +158,20 @@ declare global {
   var __opentenant_db: DatabaseSync | undefined;
 }
 
+/**
+ * Where the SQLite file lives. Defaults to ./data next to the app, which is
+ * what you want locally. On a host, point DATA_DIR at your mounted volume
+ * (e.g. /var/data on Render, /app/data in Docker) so the database survives
+ * restarts and redeploys.
+ */
+function dataDir(): string {
+  const configured = process.env.DATA_DIR?.trim();
+  return configured ? path.resolve(configured) : path.join(process.cwd(), "data");
+}
+
 export function getDb(): DatabaseSync {
   if (globalThis.__opentenant_db) return globalThis.__opentenant_db;
-  const dir = path.join(process.cwd(), "data");
+  const dir = dataDir();
   fs.mkdirSync(dir, { recursive: true });
   const db = new DatabaseSync(path.join(dir, "opentenant.db"));
   db.exec("PRAGMA journal_mode = WAL;");
