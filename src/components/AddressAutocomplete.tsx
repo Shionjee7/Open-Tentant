@@ -161,6 +161,19 @@ export default function AddressAutocomplete({
                 </button>
               </li>
             ))}
+            {/* OpenStreetMap data is ODbL-licensed and requires attribution. */}
+            <li className="border-t border-slate-100 px-3 py-1.5 text-[10px] text-ink-500">
+              Address data ©{" "}
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                OpenStreetMap
+              </a>{" "}
+              contributors
+            </li>
           </ul>
         )}
       </div>

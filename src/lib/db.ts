@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS leases (
   status TEXT NOT NULL DEFAULT 'draft',
   esign_provider TEXT NOT NULL DEFAULT '',
   esign_url TEXT NOT NULL DEFAULT '',
+  esign_document_id TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -212,6 +213,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ["leases", "unit_id", "INTEGER"],
   ["applications", "unit_id", "INTEGER"],
   ["maintenance_requests", "unit_id", "INTEGER"],
+  ["leases", "esign_document_id", "TEXT NOT NULL DEFAULT ''"],
 ];
 
 function migrate(db: DatabaseSync) {

@@ -3,9 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb, setSetting } from "./db";
-import { listQuestions } from "./data";
+import { getLease, getPerson, leaseTenantIds, listQuestions } from "./data";
 import { seedDemoData } from "./seed";
 import { fingerprint, parseStatement } from "./statements";
+import { createSignatureRequest, fetchDocumentStatus, hasApiAccess } from "./opensign";
 
 function s(form: FormData, key: string): string {
   return String(form.get(key) ?? "").trim();
@@ -434,6 +435,139 @@ export async function setLeaseStatus(form: FormData) {
     }
   }
   refresh();
+}
+
+// ---------- E-signature (OpenSign) ----------
+
+/**
+ * Sends the lease for signature.
+ *
+ * With an API token configured this creates the document in OpenSign and
+ * stores the signing link. Without one — the free self-hosted case — it records
+ * that the lease was sent and points the landlord at their OpenSign instance to
+ * upload the generated lease and send it there.
+ */
+export async function sendLeaseForSignature(form: FormData) {
+  const db = getDb();
+  const leaseId = n(form, "lease_id");
+  const lease = getLease(leaseId);
+  if (!lease) return;
+
+  const tenants = leaseTenantIds(leaseId)
+    .map((id) => getPerson(id))
+    .filter((p): p is NonNullable<typeof p> => Boolean(p));
+
+  const signers = tenants
+    .filter((t) => t.email)
+    .map((t) => ({ name: `${t.first_name} ${t.last_name}`.trim(), email: t.email }));
+
+  const title = `Lease — ${lease.property_name}${lease.unit_name ? ` — ${lease.unit_name}` : ""}`;
+
+  if (hasApiAccess()) {
+    if (signers.length === 0) {
+      redirect(`/leases/${leaseId}?esign=nosigners`);
+    }
+    // The API wants the file itself; we send the generated lease as HTML, which
+    // OpenSign converts. Anything unusual comes back as an error we surface.
+    const origin = s(form, "origin");
+    const documentHtml = await fetch(`${origin}/leases/${leaseId}/document`)
+      .then((r) => (r.ok ? r.text() : ""))
+      .catch(() => "");
+    if (!documentHtml) {
+      redirect(`/leases/${leaseId}?esign=nodoc`);
+    }
+
+    const result = await createSignatureRequest({
+      title,
+      base64File: Buffer.from(documentHtml).toString("base64"),
+      fileName: `lease-${leaseId}.html`,
+      signers,
+    });
+
+    if (!result.ok) {
+      db.prepare("UPDATE leases SET notes = ? WHERE id = ?").run(
+        `${lease.notes}\n[e-sign] ${result.error}`.trim().slice(0, 1000),
+        leaseId
+      );
+      redirect(`/leases/${leaseId}?esign=failed`);
+    }
+
+    db.prepare(
+      "UPDATE leases SET status = 'sent', esign_provider = 'opensign', esign_url = ?, esign_document_id = ? WHERE id = ?"
+    ).run(result.signingUrl, result.documentId, leaseId);
+    db.prepare(
+      `INSERT INTO documents (name, type, lease_id, property_id, status, provider, external_url)
+       VALUES (?, 'lease', ?, ?, 'sent', 'opensign', ?)`
+    ).run(title, leaseId, lease.property_id, result.signingUrl);
+    refresh();
+    redirect(`/leases/${leaseId}?esign=sent`);
+  }
+
+  // Guided (free) mode.
+  db.prepare(
+    "UPDATE leases SET status = 'sent', esign_provider = 'opensign' WHERE id = ?"
+  ).run(leaseId);
+  db.prepare(
+    `INSERT INTO documents (name, type, lease_id, property_id, status, provider)
+     VALUES (?, 'lease', ?, ?, 'sent', 'opensign')`
+  ).run(title, leaseId, lease.property_id);
+  refresh();
+  redirect(`/leases/${leaseId}?esign=guided`);
+}
+
+/** Stores the signing link copied out of OpenSign in guided mode. */
+export async function saveSigningLink(form: FormData) {
+  const leaseId = n(form, "lease_id");
+  getDb()
+    .prepare("UPDATE leases SET esign_url = ?, esign_provider = 'opensign' WHERE id = ?")
+    .run(s(form, "esign_url"), leaseId);
+  getDb()
+    .prepare(
+      "UPDATE documents SET external_url = ? WHERE lease_id = ? AND provider = 'opensign' AND external_url = ''"
+    )
+    .run(s(form, "esign_url"), leaseId);
+  refresh();
+  redirect(`/leases/${leaseId}`);
+}
+
+/** Asks OpenSign whether the lease has been signed yet (API mode only). */
+export async function refreshSigningStatus(form: FormData) {
+  const leaseId = n(form, "lease_id");
+  const db = getDb();
+  const lease = db
+    .prepare("SELECT esign_document_id FROM leases WHERE id = ?")
+    .get(leaseId) as { esign_document_id: string | null } | undefined;
+  if (!lease?.esign_document_id) {
+    redirect(`/leases/${leaseId}?esign=nostatus`);
+  }
+
+  const status = await fetchDocumentStatus(lease.esign_document_id);
+  if (!status) {
+    redirect(`/leases/${leaseId}?esign=nostatus`);
+  }
+
+  if (status.status === "signed") {
+    db.prepare("UPDATE leases SET status = 'signed' WHERE id = ?").run(leaseId);
+    db.prepare(
+      `UPDATE documents SET status = 'signed', signed_at = ?
+       WHERE lease_id = ? AND provider = 'opensign'`
+    ).run(status.signedAt ?? new Date().toISOString().slice(0, 10), leaseId);
+  }
+  refresh();
+  redirect(`/leases/${leaseId}?esign=${status.status}`);
+}
+
+/** Marks a lease signed by hand — the free path, once everyone has signed. */
+export async function markLeaseSigned(form: FormData) {
+  const db = getDb();
+  const leaseId = n(form, "lease_id");
+  db.prepare("UPDATE leases SET status = 'signed' WHERE id = ?").run(leaseId);
+  db.prepare(
+    `UPDATE documents SET status = 'signed', signed_at = datetime('now')
+     WHERE lease_id = ? AND status <> 'signed'`
+  ).run(leaseId);
+  refresh();
+  redirect(`/leases/${leaseId}`);
 }
 
 // ---------- Payments ----------
@@ -918,6 +1052,12 @@ export async function saveSettings(form: FormData) {
   setSetting("payment_methods", s(form, "payment_methods"));
   setSetting("esign_provider", s(form, "esign_provider"));
   setSetting("esign_base_url", s(form, "esign_base_url"));
+  setSetting("opensign_api_url", s(form, "opensign_api_url"));
+  // Blank submission keeps the existing token rather than wiping it, since the
+  // field is rendered empty for safety.
+  const token = s(form, "opensign_api_token");
+  if (token) setSetting("opensign_api_token", token);
+  if (form.get("clear_token")) setSetting("opensign_api_token", "");
   refresh();
   redirect("/settings");
 }

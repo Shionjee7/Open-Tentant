@@ -19,7 +19,7 @@ file on your own machine.
 | **Leads & Tenants** | Pipeline from lead → applicant → tenant → past tenant, with one-click stage moves |
 | **Applications** | Online applications with **custom questions**, an automatic income-to-rent check, and income verification |
 | **Tenant screening** | Track credit/criminal/eviction screening through any FCRA bureau — the applicant pays, you pay nothing ([how it works](docs/HOW-IT-WORKS.md)) |
-| **Leases** | Draft → sent → signed → active → ended, with tenants attached and e-sign links |
+| **Leases & e-signing** | Generates a complete, printable lease from your data, then sends it for signature through [OpenSign](https://www.opensignlabs.com) — free self-hosted, with optional API automation |
 | **Payments** | Schedule rent up to 24 months ahead, accept any method (Zelle, ACH, card, cash, check), automatic past-due tracking |
 | **Banking & Deposits** | Record which account each property's rent lands in, **import bank/Zelle/Cash App statements**, and assign each deposit to the tenant who paid — auto-suggested by amount, name, and due date |
 | **Tenant portal** | Private per-tenant link: balance due, **"I paid this"** reporting (you approve), payment history, maintenance requests |
@@ -118,4 +118,9 @@ software.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) — use it, change it, sell it, just keep the copyright notice.
+
+Third-party licenses and attribution are documented in [NOTICE.md](NOTICE.md). Short
+version: every bundled dependency is permissively licensed, and the AGPL e-signature tools
+are separate services OpenTenant talks to over the network rather than code it includes —
+so publishing this under MIT is fine.

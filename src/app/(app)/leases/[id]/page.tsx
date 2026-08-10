@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getLease, listPayments } from "@/lib/data";
+import { getLease, getPerson, leaseTenantIds, listPayments } from "@/lib/data";
 import { setLeaseStatus } from "@/lib/actions";
 import { money, shortDate, titleCase } from "@/lib/format";
 import { Badge, BackLink, PageHeader } from "@/components/ui";
+import SigningPanel from "@/components/SigningPanel";
+import type { Person } from "@/lib/types";
 
 export const metadata = { title: "Lease" };
 
@@ -17,15 +19,21 @@ const TRANSITIONS: Record<string, { status: string; label: string }[]> = {
 
 export default async function LeaseDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ esign?: string }>;
 }) {
   const { id } = await params;
+  const { esign } = await searchParams;
   const lease = getLease(Number(id));
   if (!lease) notFound();
 
   const payments = listPayments().filter((p) => p.lease_id === lease.id);
   const transitions = TRANSITIONS[lease.status] ?? [];
+  const tenants = leaseTenantIds(lease.id)
+    .map((personId) => getPerson(personId))
+    .filter((p): p is Person => Boolean(p));
 
   return (
     <>
@@ -80,6 +88,10 @@ export default async function LeaseDetailPage({
           <span className="font-semibold">Notes: </span>{lease.notes}
         </div>
       )}
+
+      <div className="mb-6">
+        <SigningPanel lease={lease} tenants={tenants} notice={esign} />
+      </div>
 
       <section className="card">
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">

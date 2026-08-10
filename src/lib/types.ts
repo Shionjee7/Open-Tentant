@@ -103,6 +103,7 @@ export type Lease = {
   status: "draft" | "sent" | "signed" | "active" | "ended";
   esign_provider: string;
   esign_url: string;
+  esign_document_id: string;
   notes: string;
   created_at: string;
   property_name?: string;
