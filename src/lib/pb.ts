@@ -9,7 +9,10 @@ import PocketBase from "pocketbase";
  * anonymous callers — the app is the only client.
  */
 
-const PB_URL = process.env.PB_URL?.trim() || "http://127.0.0.1:8090";
+// PB_URL wins when PocketBase runs elsewhere; otherwise follow PB_PORT so
+// changing the port in one place moves both the server and this client.
+const PB_URL =
+  process.env.PB_URL?.trim() || `http://127.0.0.1:${process.env.PB_PORT?.trim() || "8090"}`;
 const PB_EMAIL = process.env.PB_ADMIN_EMAIL?.trim() || "admin@opentenant.local";
 const PB_PASSWORD = process.env.PB_ADMIN_PASSWORD?.trim() || "opentenant-local-dev";
 
