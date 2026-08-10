@@ -6,6 +6,7 @@ import { pb } from "./pb";
 import {
   getLease,
   getPerson,
+  getSetting,
   leaseTenantIds,
   listQuestions,
   setSetting,
@@ -13,6 +14,7 @@ import {
 import { seedDemoData } from "./seed";
 import { fingerprint, parseStatement } from "./statements";
 import { createSignatureRequest, fetchDocumentStatus, hasApiAccess } from "./opensign";
+import { sendEmail, sendEmailQuietly, smtpConfig, templates } from "./email";
 import type { Id } from "./types";
 
 function s(form: FormData, key: string): string {
@@ -39,6 +41,32 @@ function refresh() {
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** Public base URL, used to build links inside emails. */
+async function appUrl(): Promise<string> {
+  return (
+    process.env.APP_URL?.trim() ||
+    (await getSetting("app_url")) ||
+    "http://localhost:3000"
+  );
+}
+
+async function businessName(): Promise<string> {
+  return (await getSetting("business_name")) || "OpenTenant";
+}
+
+async function portalUrlFor(token: string): Promise<string> {
+  return `${await appUrl()}/portal/${token}`;
+}
+
+/**
+ * Where landlord notifications go. Resolved through the SMTP config so an
+ * environment variable works just as well as the saved setting, and so it
+ * falls back to the sending account when no separate address is set.
+ */
+async function landlordInbox(): Promise<string> {
+  return (await smtpConfig()).notifyEmail;
 }
 
 // ---------- Demo data ----------
@@ -348,6 +376,27 @@ export async function submitApplication(form: FormData) {
     move_in_date: s(form, "move_in_date"),
   });
 
+  // Confirm to the applicant, and tell the landlord something came in.
+  const propertyRecord = propertyId
+    ? await client.collection("properties").getOne(propertyId).catch(() => null)
+    : null;
+  const unitRecord = unitId
+    ? await client.collection("units").getOne(unitId).catch(() => null)
+    : null;
+  const label = [propertyRecord?.name, unitRecord?.name].filter(Boolean).join(" — ") || "the property";
+  const applicantName = `${s(form, "first_name")} ${s(form, "last_name")}`.trim();
+  const business = await businessName();
+
+  if (person.email) {
+    const mail = templates.applicationReceived(business, applicantName, label);
+    await sendEmailQuietly({ to: person.email, ...mail });
+  }
+  const landlordTo = await landlordInbox();
+  const alert = templates.newApplicationAlert(
+    business, applicantName, label, n(form, "monthly_income"), await appUrl()
+  );
+  await sendEmailQuietly({ to: landlordTo, replyTo: person.email, ...alert });
+
   refresh();
   redirect("/apply/thanks");
 }
@@ -358,8 +407,9 @@ export async function setApplicationStatus(form: FormData) {
   const status = s(form, "status");
   await client.collection("applications").update(id, { status });
 
+  const application = await client.collection("applications").getOne(id);
+
   if (status === "approved") {
-    const application = await client.collection("applications").getOne(id);
     await client.collection("people").update(application.person, {
       stage: "tenant",
       property: application.property || "",
@@ -368,6 +418,26 @@ export async function setApplicationStatus(form: FormData) {
     if (application.unit) {
       await client.collection("units").update(application.unit, { status: "occupied" });
       await syncPropertyOccupancy(application.property);
+    }
+  }
+
+  if (status === "approved" || status === "denied") {
+    const person = await client.collection("people").getOne(application.person).catch(() => null);
+    if (person?.email) {
+      const property = application.property
+        ? await client.collection("properties").getOne(application.property).catch(() => null)
+        : null;
+      const unit = application.unit
+        ? await client.collection("units").getOne(application.unit).catch(() => null)
+        : null;
+      const label = [property?.name, unit?.name].filter(Boolean).join(" — ") || "the property";
+      const name = `${person.first_name} ${person.last_name}`.trim();
+      const business = await businessName();
+      const mail =
+        status === "approved"
+          ? templates.applicationApproved(business, name, label)
+          : templates.applicationDenied(business, name, label);
+      await sendEmailQuietly({ to: person.email, ...mail });
     }
   }
   refresh();
@@ -640,7 +710,28 @@ export async function markPaymentPaid(form: FormData) {
     .collection("payments")
     .update(id, { status: "paid", paid_date: paidDate, method });
   await bookPaymentIncome(id, paidDate, method, `Payment received (${method})`);
+  await emailReceipt(id, paidDate, method);
   refresh();
+}
+
+/** Emails the tenant a receipt once a payment is recorded as paid. */
+async function emailReceipt(paymentId: Id, paidDate: string, method: string) {
+  const client = await pb();
+  const payment = await client.collection("payments").getOne(paymentId).catch(() => null);
+  if (!payment?.person) return;
+  const person = await client.collection("people").getOne(payment.person).catch(() => null);
+  if (!person?.email) return;
+
+  const amount = payment.amount.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const mail = templates.paymentReceipt(
+    await businessName(),
+    `${person.first_name} ${person.last_name}`.trim(),
+    amount,
+    paidDate,
+    method,
+    await portalUrlFor(person.portal_token)
+  );
+  await sendEmailQuietly({ to: person.email, ...mail });
 }
 
 export async function deletePayment(form: FormData) {
@@ -701,15 +792,30 @@ export async function portalCreateMaintenance(form: FormData) {
   if (!propertyId) return;
 
   const client = await pb();
+  const title = s(form, "title");
+  const priority = s(form, "priority") || "medium";
   await client.collection("maintenance_requests").create({
     property: propertyId,
     unit: person.unit || "",
     person: person.id,
-    title: s(form, "title"),
+    title,
     description: s(form, "description"),
-    priority: s(form, "priority") || "medium",
+    priority,
     status: "new",
   });
+
+  const business = await businessName();
+  const tenantName = `${person.first_name} ${person.last_name}`.trim();
+  if (person.email) {
+    const mail = templates.maintenanceReceived(business, tenantName, title, await portalUrlFor(token));
+    await sendEmailQuietly({ to: person.email, ...mail });
+  }
+  const property = await client.collection("properties").getOne(propertyId).catch(() => null);
+  const alert = templates.maintenanceAlert(
+    business, tenantName, property?.name ?? "a property", title, priority, await appUrl()
+  );
+  await sendEmailQuietly({ to: await landlordInbox(), ...alert });
+
   refresh();
   redirect(`/portal/${token}`);
 }
@@ -724,6 +830,7 @@ export async function approveReportedPayment(form: FormData) {
   const method = payment.reported_method || "other";
   await client.collection("payments").update(id, { status: "paid", paid_date: paidDate, method });
   await bookPaymentIncome(id, paidDate, method, `Tenant-reported payment approved (${method})`);
+  await emailReceipt(id, paidDate, method);
   refresh();
 }
 
@@ -844,6 +951,7 @@ export async function matchImport(form: FormData) {
     payment: paymentId,
     person: payment.person || "",
   });
+  await emailReceipt(paymentId, deposit.posted_date, deposit.source);
   refresh();
 }
 
@@ -1013,20 +1121,96 @@ export async function updateConditionReport(form: FormData) {
   redirect(`/condition-reports/${id}`);
 }
 
+// ---------- Email you send on purpose ----------
+
+/** Emails a tenant their private portal link. */
+export async function sendPortalInvite(form: FormData) {
+  const client = await pb();
+  const person = await client.collection("people").getOne(s(form, "id")).catch(() => null);
+  if (!person?.email) redirect("/contacts?mail=noaddress");
+
+  const mail = templates.portalInvite(
+    await businessName(),
+    `${person.first_name} ${person.last_name}`.trim(),
+    await portalUrlFor(person.portal_token)
+  );
+  const result = await sendEmail({ to: person.email, ...mail });
+  refresh();
+  redirect(`/contacts?stage=${person.stage}&mail=${result.ok ? "sent" : "failed"}`);
+}
+
+/** Emails a rent reminder (or past-due notice) for one scheduled payment. */
+export async function sendPaymentReminder(form: FormData) {
+  const client = await pb();
+  const payment = await client.collection("payments").getOne(s(form, "id")).catch(() => null);
+  if (!payment?.person) redirect("/payments?mail=noaddress");
+
+  const person = await client.collection("people").getOne(payment.person).catch(() => null);
+  if (!person?.email) redirect("/payments?mail=noaddress");
+
+  const amount = payment.amount.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const mail = templates.paymentReminder(
+    await businessName(),
+    `${person.first_name} ${person.last_name}`.trim(),
+    amount,
+    payment.due_date,
+    payment.due_date < todayIso(),
+    await portalUrlFor(person.portal_token),
+    await getSetting("payment_instructions")
+  );
+  const result = await sendEmail({ to: person.email, ...mail });
+  refresh();
+  redirect(`/payments?mail=${result.ok ? "sent" : "failed"}`);
+}
+
+/** Sends a test message so you can prove the SMTP settings work. */
+export async function sendTestEmail(form: FormData) {
+  const to = s(form, "to") || (await landlordInbox());
+  if (!to) redirect("/settings?mail=noaddress");
+  const result = await sendEmail({ to, ...templates.test(await businessName()) });
+  redirect(
+    result.ok
+      ? "/settings?mail=sent"
+      : `/settings?mail=failed&reason=${encodeURIComponent(result.error.slice(0, 200))}`
+  );
+}
+
 // ---------- Settings ----------
 
 export async function saveSettings(form: FormData) {
-  await setSetting("business_name", s(form, "business_name"));
-  await setSetting("payment_instructions", s(form, "payment_instructions"));
-  await setSetting("payment_methods", s(form, "payment_methods"));
-  await setSetting("esign_provider", s(form, "esign_provider"));
-  await setSetting("esign_base_url", s(form, "esign_base_url"));
-  await setSetting("opensign_api_url", s(form, "opensign_api_url"));
+  /**
+   * Settings live on more than one form, so only write the keys this
+   * submission actually carried — otherwise saving the payments form would
+   * blank out the email settings and vice versa.
+   */
+  const save = async (key: string, field = key) => {
+    if (form.has(field)) await setSetting(key, s(form, field));
+  };
 
-  // The token field renders empty for safety, so a blank submission keeps it.
+  await save("business_name");
+  await save("payment_instructions");
+  await save("payment_methods");
+  await save("esign_provider");
+  await save("esign_base_url");
+  await save("opensign_api_url");
+  await save("app_url");
+  await save("smtp_host");
+  await save("smtp_port");
+  await save("smtp_secure");
+  await save("smtp_user");
+  await save("smtp_from_name");
+  await save("smtp_from_email");
+  await save("smtp_notify_email");
+
+  // Secrets render empty for safety, so a blank submission keeps the stored
+  // value and clearing takes an explicit checkbox.
   const token = s(form, "opensign_api_token");
   if (token) await setSetting("opensign_api_token", token);
   if (flag(form, "clear_token")) await setSetting("opensign_api_token", "");
+
+  const smtpPassword = s(form, "smtp_password");
+  if (smtpPassword) await setSetting("smtp_password", smtpPassword);
+  if (flag(form, "clear_smtp_password")) await setSetting("smtp_password", "");
 
   refresh();
   redirect("/settings");

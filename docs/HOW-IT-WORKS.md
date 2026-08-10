@@ -76,7 +76,34 @@ or document record. OpenTenant tracks draft → sent → viewed → signed.
 | E-signatures | $0 self-hosted | — |
 | Hosting | $0 on your own machine; a few dollars a month on a host | You |
 
-## 6. Address autocomplete
+## 6. Email
+
+OpenTenant sends mail through **your own email account** over SMTP — there is no mail service
+to subscribe to and no per-message cost. Gmail is the common choice and the app offers it as a
+preset.
+
+**Gmail needs an App Password**, not your normal password: turn on 2-Step Verification, then
+create one at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+and paste the 16-character value into Settings. A free Gmail account sends roughly 500 messages
+a day, far more than a rental portfolio needs. Outlook, iCloud, Yahoo, and any custom SMTP
+server work the same way.
+
+What gets sent automatically:
+
+| Trigger | Who gets it |
+|---|---|
+| Application submitted | Confirmation to the applicant, alert to you |
+| Application approved or denied | The applicant |
+| Payment recorded, approved, or matched from a statement | Receipt to the tenant |
+| Maintenance request from the portal | Confirmation to the tenant, alert to you |
+
+And on demand: rent reminders (**Remind** on any unpaid payment) and portal invites
+(**Email link** next to any tenant).
+
+Sending never blocks the app — if mail fails, the application, payment, or request is still
+recorded, and the failure is logged.
+
+## 7. Address autocomplete
 
 Property address fields autocomplete via [OpenStreetMap
 Nominatim](https://nominatim.openstreetmap.org) — free, open data, no API key or account.

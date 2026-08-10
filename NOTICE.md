@@ -13,6 +13,7 @@ with all of it.
 | [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | MIT | Styling |
 | [TypeScript](https://github.com/microsoft/TypeScript) | Apache-2.0 | Build-time only |
 | [PocketBase](https://github.com/pocketbase/pocketbase) | MIT | Database, REST API, admin console |
+| [Nodemailer](https://github.com/nodemailer/nodemailer) | MIT-0 | Sending email over SMTP |
 | SQLite (inside PocketBase) | Public domain | Storage engine |
 
 All permissive. None of them require OpenTenant to adopt their license, and MIT is

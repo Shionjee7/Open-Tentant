@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { countPeopleByStage, listPeople, listProperties } from "@/lib/data";
-import { createPerson, setPersonStage } from "@/lib/actions";
+import { createPerson, sendPortalInvite, setPersonStage } from "@/lib/actions";
 import { shortDate } from "@/lib/format";
 import { Badge, EmptyState, PageHeader } from "@/components/ui";
 
@@ -96,14 +96,24 @@ export default async function ContactsPage({
                         <td className="td text-right">
                           <div className="flex items-center justify-end gap-2">
                             {p.stage === "tenant" && p.portal_token && (
-                              <Link
-                                href={`/portal/${p.portal_token}`}
-                                target="_blank"
-                                className="text-xs font-medium text-brand-600 hover:underline"
-                                title="Tenant portal — share this link with the tenant"
-                              >
-                                Portal ↗
-                              </Link>
+                              <>
+                                <Link
+                                  href={`/portal/${p.portal_token}`}
+                                  target="_blank"
+                                  className="text-xs font-medium text-brand-600 hover:underline"
+                                  title="Tenant portal — share this link with the tenant"
+                                >
+                                  Portal ↗
+                                </Link>
+                                {p.email && (
+                                  <form action={sendPortalInvite} className="inline">
+                                    <input type="hidden" name="id" value={p.id} />
+                                    <button className="btn-secondary btn-sm" title="Email this tenant their portal link">
+                                      Email link
+                                    </button>
+                                  </form>
+                                )}
+                              </>
                             )}
                             {next && (
                               <form action={setPersonStage} className="inline">

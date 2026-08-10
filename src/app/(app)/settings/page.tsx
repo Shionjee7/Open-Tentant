@@ -1,12 +1,18 @@
 import { listQuestions } from "@/lib/data";
 import { getSetting } from "@/lib/data";
-import { archiveQuestion, createQuestion, saveSettings } from "@/lib/actions";
+import { archiveQuestion, createQuestion, saveSettings, sendTestEmail } from "@/lib/actions";
 import { PageHeader, ProBadge } from "@/components/ui";
+import EmailSettings from "@/components/EmailSettings";
 import { titleCase } from "@/lib/format";
 
 export const metadata = { title: "Settings" };
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ mail?: string; reason?: string }>;
+}) {
+  const { mail, reason } = await searchParams;
   const questions = await listQuestions();
   return (
     <>
@@ -112,6 +118,81 @@ export default async function SettingsPage() {
 
           <button className="btn">Save settings</button>
         </form>
+
+        <section id="email" className="card p-6">
+          <h2 className="font-semibold">Email notifications</h2>
+          <p className="mt-1 text-xs text-ink-500">
+            Connect your Gmail (or any email account) and OpenTenant will confirm applications,
+            announce new ones to you, send approval and denial notices, rent reminders and
+            receipts, and maintenance updates.
+          </p>
+
+          {mail && (
+            <div
+              className={`mt-3 rounded-lg px-3 py-2 text-sm ${
+                mail === "sent"
+                  ? "bg-emerald-50 text-emerald-800"
+                  : "bg-amber-50 text-amber-800"
+              }`}
+            >
+              {mail === "sent" && "Test email sent — check the inbox."}
+              {mail === "noaddress" && "Add a notification address first."}
+              {mail === "failed" && (
+                <>
+                  Couldn&apos;t send: {reason ?? "check the server, address, and password."}
+                  <br />
+                  <span className="text-xs">
+                    With Gmail, make sure you used an App Password, not your account password.
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+
+          <form action={saveSettings} className="mt-4 space-y-4">
+
+            <div>
+              <label className="label">Public address of this app</label>
+              <input
+                name="app_url"
+                type="url"
+                defaultValue={await getSetting("app_url")}
+                className="input"
+                placeholder="https://rentals.yourdomain.com"
+              />
+              <p className="mt-1 text-xs text-ink-500">
+                Used to build the links inside emails, like tenant portal links.
+              </p>
+            </div>
+
+            <EmailSettings
+              host={await getSetting("smtp_host")}
+              port={await getSetting("smtp_port")}
+              secure={await getSetting("smtp_secure")}
+              user={await getSetting("smtp_user")}
+              fromName={await getSetting("smtp_from_name")}
+              fromEmail={await getSetting("smtp_from_email")}
+              notifyEmail={await getSetting("smtp_notify_email")}
+              hasPassword={Boolean(await getSetting("smtp_password"))}
+            />
+
+            <button className="btn">Save email settings</button>
+          </form>
+
+          <form action={sendTestEmail} className="mt-4 flex flex-wrap items-end gap-2 border-t border-slate-100 pt-4">
+            <div className="flex-1">
+              <label className="label">Send a test email to</label>
+              <input
+                name="to"
+                type="email"
+                defaultValue={await getSetting("smtp_notify_email")}
+                className="input"
+                placeholder="you@example.com"
+              />
+            </div>
+            <button className="btn-secondary">Send test</button>
+          </form>
+        </section>
 
         <section id="questions" className="card p-6">
           <h2 className="flex items-center gap-2 font-semibold">

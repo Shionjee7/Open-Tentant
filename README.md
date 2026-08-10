@@ -27,6 +27,7 @@ machine, in a database you control.
 | **Documents & E-Sign** | Track documents through signing via open-source tools ([Documenso](https://documenso.com), [DocuSeal](https://www.docuseal.com), [OpenSign](https://www.opensignlabs.com)) |
 | **Condition reports** | 12-area move-in/move-out checklists that lock when completed |
 | **Accounting & Insights** | Approved payments auto-book as income; expenses by category; income-vs-expense chart; net profit |
+| **Email notifications** | Connect Gmail (or any SMTP) and the app confirms applications, alerts you to new ones, sends approval/denial notices, rent reminders, payment receipts, portal invites, and maintenance updates |
 | **Resources** | Built-in guides for screening, rent collection, room rentals, and reconciliation |
 
 ## Screenshots
@@ -94,6 +95,9 @@ Every setting is optional — the app runs with none of them.
 | `PORT` | Port to listen on (default 3000). |
 | `GEOCODER_URL` | Your own Nominatim/Photon instance for address autocomplete. |
 | `GEOCODER_CONTACT` | Contact string sent with geocoding requests. |
+| `APP_URL` | Public address, used for links inside emails. |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | Email account. Also settable in Settings. |
+| `SMTP_FROM_NAME` / `SMTP_FROM_EMAIL` / `SMTP_NOTIFY_EMAIL` | Sender identity and where your alerts go. |
 
 ## Tech stack
 
@@ -109,7 +113,6 @@ startup, so upgrading is `git pull` with no manual steps.
 ## Roadmap
 
 - [ ] Multi-user auth (multiple landlord accounts; today it's a single shared password)
-- [ ] Email notifications (rent reminders, application received, maintenance updates)
 - [ ] Optional Stripe integration for in-app card & ACH payments
 - [ ] Direct e-sign API integration instead of pasted links
 - [ ] File uploads in the UI (the collections already accept them)

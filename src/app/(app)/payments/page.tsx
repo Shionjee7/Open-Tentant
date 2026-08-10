@@ -6,6 +6,7 @@ import {
   deletePayment,
   markPaymentPaid,
   rejectReportedPayment,
+  sendPaymentReminder,
 } from "@/lib/actions";
 import { money, moneyExact, shortDate, titleCase } from "@/lib/format";
 import { Badge, EmptyState, PageHeader, StatCard } from "@/components/ui";
@@ -136,6 +137,12 @@ export default async function PaymentsPage() {
                               <option value="other">Other</option>
                             </select>
                             <button className="btn btn-sm">Mark paid</button>
+                          </form>
+                          <form action={sendPaymentReminder}>
+                            <input type="hidden" name="id" value={p.id} />
+                            <button className="btn-secondary btn-sm" title="Email the tenant a reminder">
+                              Remind
+                            </button>
                           </form>
                           <form action={deletePayment}>
                             <input type="hidden" name="id" value={p.id} />

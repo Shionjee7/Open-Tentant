@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "next": "^15.4.6",
+    "nodemailer": "^7.0.13",
     "pocketbase": "^0.27.1",
     "pocketbase-server": "^0.39.5",
     "react": "^19.1.1",
@@ -25,9 +26,11 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.11",
     "@types/node": "^22.15.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.7",
     "postcss": "^8.5.6",
+    "smtp-server": "^3.19.3",
     "tailwindcss": "^4.1.11",
     "typescript": "^5.8.3"
   }
