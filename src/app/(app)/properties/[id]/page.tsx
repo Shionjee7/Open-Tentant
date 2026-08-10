@@ -15,17 +15,17 @@ export default async function PropertyDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const property = getProperty(Number(id));
+  const property = await getProperty(id);
   if (!property) notFound();
 
-  const leases = listLeases().filter((l) => l.property_id === property.id);
-  const maintenance = listMaintenance().filter((m) => m.property_id === property.id);
-  const tenants = listPeople("tenant").filter((p) => p.property_id === property.id);
+  const leases = (await listLeases()).filter((l) => l.property === property.id);
+  const maintenance = (await listMaintenance()).filter((m) => m.property === property.id);
+  const tenants = (await listPeople("tenant")).filter((p) => p.property === property.id);
   const byRoom = property.rental_type === "by_room";
-  const rooms = byRoom ? listUnits(property.id) : [];
+  const rooms = byRoom ? await listUnits(property.id) : [];
   // Anyone who could move into a room: current tenants plus approved applicants.
   const roomCandidates = byRoom
-    ? listPeople().filter((p) => p.stage === "tenant" || p.stage === "applicant")
+    ? (await listPeople()).filter((p) => p.stage === "tenant" || p.stage === "applicant")
     : [];
 
   return (
@@ -143,7 +143,7 @@ export default async function PropertyDetailPage({
                   <li key={m.id} className="flex items-center justify-between px-4 py-3 text-sm">
                     <div>
                       <div className="font-medium">{m.title}</div>
-                      <div className="text-xs text-ink-500">{shortDate(m.created_at)}</div>
+                      <div className="text-xs text-ink-500">{shortDate(m.created)}</div>
                     </div>
                     <Badge value={m.status} />
                   </li>

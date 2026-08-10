@@ -1,266 +1,177 @@
-import { getDb, setSetting } from "./db";
+import { pb } from "./pb";
+import { setSetting } from "./data";
 
-function iso(d: Date): string {
-  return d.toISOString().slice(0, 10);
+function iso(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
 function monthsAgo(months: number, day = 1): Date {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth() - months, day);
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() - months, day);
 }
 
-/** Populates the database with realistic demo data so new users can explore
- *  every module. Safe to call only on an empty database. */
-export function seedDemoData() {
-  const db = getDb();
-  const existing = db.prepare("SELECT COUNT(*) AS n FROM properties").get() as { n: number };
-  if (existing.n > 0) return;
+/**
+ * Fills a fresh install with realistic demo data so every module has something
+ * to show. Does nothing once any property exists.
+ */
+export async function seedDemoData(): Promise<void> {
+  const client = await pb();
+  const existing = await client.collection("properties").getFullList({ perPage: 1 });
+  if (existing.length > 0) return;
 
-  const insertProperty = db.prepare(
-    `INSERT INTO properties (name, address, city, state, zip, type, beds, baths, sqft, rent, deposit, status, listed, priority_listing, description, amenities)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  const maple = Number(
-    insertProperty.run(
-      "Maple Street House", "412 Maple St", "Columbus", "OH", "43004",
-      "single_family", 3, 2, 1650, 1850, 1850, "occupied", 0, 0,
-      "Charming 3-bed home with a fenced backyard and updated kitchen.",
-      "Washer/Dryer, Garage, Fenced Yard, Central A/C"
-    ).lastInsertRowid
-  );
-  const oak = Number(
-    insertProperty.run(
-      "Oakwood Apartments #2B", "88 Oakwood Ave, Unit 2B", "Columbus", "OH", "43201",
-      "apartment", 2, 1, 900, 1250, 1250, "occupied", 0, 0,
-      "Bright 2-bed apartment near campus, water included.",
-      "Water Included, On-site Laundry, Parking"
-    ).lastInsertRowid
-  );
-  const cedar = Number(
-    insertProperty.run(
-      "Cedar Duplex - Unit A", "17 Cedar Ln, Unit A", "Westerville", "OH", "43081",
-      "duplex", 2, 1.5, 1100, 1450, 1450, "vacant", 1, 1,
-      "Renovated duplex unit with new flooring and stainless appliances. Available now!",
-      "New Appliances, Pet Friendly, Off-street Parking"
-    ).lastInsertRowid
-  );
-  const birch = Number(
-    insertProperty.run(
-      "Birch Condo 5F", "230 Birch Blvd, 5F", "Columbus", "OH", "43215",
-      "condo", 1, 1, 720, 1150, 1150, "vacant", 1, 0,
-      "Downtown condo with skyline views, gym and rooftop access.",
-      "Gym, Rooftop, Dishwasher, In-unit Laundry"
-    ).lastInsertRowid
-  );
-
-  // A house rented out room by room — the co-living / rent-by-the-room case.
-  const willow = Number(
-    insertProperty.run(
-      "Willow House (by the room)", "905 Willow Dr", "Columbus", "OH", "43206",
-      "single_family", 4, 2, 2100, 0, 0, "occupied", 1, 0,
-      "Rooms for rent in a shared 4-bedroom house. Utilities and wifi included.",
-      "Wifi Included, Utilities Included, Shared Kitchen, Laundry, Backyard"
-    ).lastInsertRowid
-  );
-  db.prepare("UPDATE properties SET rental_type = 'by_room' WHERE id = ?").run(willow);
-  const insertUnit = db.prepare(
-    `INSERT INTO units (property_id, name, rent, deposit, status, size_sqft, private_bath, furnished, listed, description)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
-  );
-  const room1 = Number(insertUnit.run(willow, "Room 1 — Master", 850, 850, "occupied", 220, 1, 1, "Largest room, private ensuite bath.").lastInsertRowid);
-  const room2 = Number(insertUnit.run(willow, "Room 2", 700, 700, "occupied", 160, 0, 1, "Furnished, shared hall bath.").lastInsertRowid);
-  const room3 = Number(insertUnit.run(willow, "Room 3", 675, 675, "vacant", 150, 0, 1, "Bright corner room, available now.").lastInsertRowid);
-  const room4 = Number(insertUnit.run(willow, "Room 4", 650, 650, "vacant", 140, 0, 0, "Unfurnished, quiet side of the house.").lastInsertRowid);
-
-  const insertPerson = db.prepare(
-    `INSERT INTO people (first_name, last_name, email, phone, stage, property_id, notes, portal_token)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  );
   const token = () => crypto.randomUUID();
-  const marcus = Number(
-    insertPerson.run("Marcus", "Webb", "marcus.webb@example.com", "(614) 555-0121", "tenant", maple,
-      "Great tenant, always pays on time.", token()).lastInsertRowid
-  );
-  const dana = Number(
-    insertPerson.run("Dana", "Liu", "dana.liu@example.com", "(614) 555-0177", "tenant", oak,
-      "Renewed lease last spring.", token()).lastInsertRowid
-  );
-  const priya = Number(
-    insertPerson.run("Priya", "Sharma", "priya.s@example.com", "(614) 555-0163", "applicant", cedar,
-      "Applied for Cedar Duplex. Screening in progress.", token()).lastInsertRowid
-  );
-  insertPerson.run("Jordan", "Ellis", "jordan.e@example.com", "(614) 555-0142", "lead", cedar,
-    "Asked about pet policy via listing page.", token());
-  insertPerson.run("Sam", "Okafor", "sam.okafor@example.com", "(614) 555-0198", "lead", birch,
-    "Wants a tour next weekend.", token());
-  insertPerson.run("Rita", "Alvarez", "rita.alv@example.com", "(614) 555-0110", "past", null,
-    "Moved out of Cedar Duplex in good standing.", token());
+  const property = (data: Record<string, unknown>) =>
+    client.collection("properties").create(data);
 
-  // Room tenants at Willow House.
-  const insertRoomTenant = db.prepare(
-    `INSERT INTO people (first_name, last_name, email, phone, stage, property_id, unit_id, notes, portal_token)
-     VALUES (?, ?, ?, ?, 'tenant', ?, ?, ?, ?)`
-  );
-  const theo = Number(
-    insertRoomTenant.run("Theo", "Nguyen", "theo.n@example.com", "(614) 555-0134", willow, room1,
-      "Rents the master room.", token()).lastInsertRowid
-  );
-  const amara = Number(
-    insertRoomTenant.run("Amara", "Bello", "amara.b@example.com", "(614) 555-0156", willow, room2,
-      "Rents Room 2.", token()).lastInsertRowid
-  );
+  const maple = await property({
+    name: "Maple Street House", address: "412 Maple St", city: "Columbus", state: "OH", zip: "43004",
+    type: "single_family", beds: 3, baths: 2, sqft: 1650, rent: 1850, deposit: 1850,
+    status: "occupied", listed: false, priority_listing: false, rental_type: "whole",
+    description: "Charming 3-bed home with a fenced backyard and updated kitchen.",
+    amenities: "Washer/Dryer, Garage, Fenced Yard, Central A/C",
+  });
+  const oak = await property({
+    name: "Oakwood Apartments #2B", address: "88 Oakwood Ave, Unit 2B", city: "Columbus", state: "OH", zip: "43201",
+    type: "apartment", beds: 2, baths: 1, sqft: 900, rent: 1250, deposit: 1250,
+    status: "occupied", listed: false, priority_listing: false, rental_type: "whole",
+    description: "Bright 2-bed apartment near campus, water included.",
+    amenities: "Water Included, On-site Laundry, Parking",
+  });
+  const cedar = await property({
+    name: "Cedar Duplex - Unit A", address: "17 Cedar Ln, Unit A", city: "Westerville", state: "OH", zip: "43081",
+    type: "duplex", beds: 2, baths: 1.5, sqft: 1100, rent: 1450, deposit: 1450,
+    status: "vacant", listed: true, priority_listing: true, rental_type: "whole",
+    description: "Renovated duplex unit with new flooring and stainless appliances. Available now!",
+    amenities: "New Appliances, Pet Friendly, Off-street Parking",
+  });
+  await property({
+    name: "Birch Condo 5F", address: "230 Birch Blvd, 5F", city: "Columbus", state: "OH", zip: "43215",
+    type: "condo", beds: 1, baths: 1, sqft: 720, rent: 1150, deposit: 1150,
+    status: "vacant", listed: true, priority_listing: false, rental_type: "whole",
+    description: "Downtown condo with skyline views, gym and rooftop access.",
+    amenities: "Gym, Rooftop, Dishwasher, In-unit Laundry",
+  });
 
-  const insertQuestion = db.prepare(
-    "INSERT INTO custom_questions (question, type, required) VALUES (?, ?, ?)"
-  );
-  insertQuestion.run("Do you have pets? If yes, what kind?", "text", 1);
-  insertQuestion.run("Have you ever been evicted?", "yesno", 1);
-  insertQuestion.run("How many people will live in the unit?", "number", 1);
-  insertQuestion.run("Do you smoke?", "yesno", 0);
+  // A house rented out room by room.
+  const willow = await property({
+    name: "Willow House (by the room)", address: "905 Willow Dr", city: "Columbus", state: "OH", zip: "43206",
+    type: "single_family", beds: 4, baths: 2, sqft: 2100, rent: 0, deposit: 0,
+    status: "occupied", listed: true, priority_listing: false, rental_type: "by_room",
+    description: "Rooms for rent in a shared 4-bedroom house. Utilities and wifi included.",
+    amenities: "Wifi Included, Utilities Included, Shared Kitchen, Laundry, Backyard",
+  });
 
-  db.prepare(
-    `INSERT INTO applications (person_id, property_id, status, monthly_income, employer, income_verified, screening_status, screening_notes, answers, move_in_date)
-     VALUES (?, ?, 'screening', 5400, 'Riverside Health', 1, 'requested', 'Credit + background report requested.', ?, ?)`
-  ).run(
-    priya, cedar,
-    JSON.stringify([
+  const unit = (data: Record<string, unknown>) => client.collection("units").create(data);
+  const room1 = await unit({ property: willow.id, name: "Room 1 — Master", rent: 850, deposit: 850, status: "occupied", size_sqft: 220, private_bath: true, furnished: true, listed: true, description: "Largest room, private ensuite bath." });
+  const room2 = await unit({ property: willow.id, name: "Room 2", rent: 700, deposit: 700, status: "occupied", size_sqft: 160, private_bath: false, furnished: true, listed: true, description: "Furnished, shared hall bath." });
+  await unit({ property: willow.id, name: "Room 3", rent: 675, deposit: 675, status: "vacant", size_sqft: 150, private_bath: false, furnished: true, listed: true, description: "Bright corner room, available now." });
+  await unit({ property: willow.id, name: "Room 4", rent: 650, deposit: 650, status: "vacant", size_sqft: 140, private_bath: false, furnished: false, listed: true, description: "Unfurnished, quiet side of the house." });
+
+  const person = (data: Record<string, unknown>) =>
+    client.collection("people").create({ portal_token: token(), ...data });
+
+  const marcus = await person({ first_name: "Marcus", last_name: "Webb", email: "marcus.webb@example.com", phone: "(614) 555-0121", stage: "tenant", property: maple.id, notes: "Great tenant, always pays on time." });
+  const dana = await person({ first_name: "Dana", last_name: "Liu", email: "dana.liu@example.com", phone: "(614) 555-0177", stage: "tenant", property: oak.id, notes: "Renewed lease last spring." });
+  const priya = await person({ first_name: "Priya", last_name: "Sharma", email: "priya.s@example.com", phone: "(614) 555-0163", stage: "applicant", property: cedar.id, notes: "Applied for Cedar Duplex. Screening in progress." });
+  await person({ first_name: "Jordan", last_name: "Ellis", email: "jordan.e@example.com", phone: "(614) 555-0142", stage: "lead", property: cedar.id, notes: "Asked about pet policy via listing page." });
+  await person({ first_name: "Sam", last_name: "Okafor", email: "sam.okafor@example.com", phone: "(614) 555-0198", stage: "lead", notes: "Wants a tour next weekend." });
+  await person({ first_name: "Rita", last_name: "Alvarez", email: "rita.alv@example.com", phone: "(614) 555-0110", stage: "past", notes: "Moved out of Cedar Duplex in good standing." });
+  const theo = await person({ first_name: "Theo", last_name: "Nguyen", email: "theo.n@example.com", phone: "(614) 555-0134", stage: "tenant", property: willow.id, unit: room1.id, notes: "Rents the master room." });
+  const amara = await person({ first_name: "Amara", last_name: "Bello", email: "amara.b@example.com", phone: "(614) 555-0156", stage: "tenant", property: willow.id, unit: room2.id, notes: "Rents Room 2." });
+
+  const question = (question: string, type: string, required: boolean) =>
+    client.collection("custom_questions").create({ question, type, required, archived: false });
+  await question("Do you have pets? If yes, what kind?", "text", true);
+  await question("Have you ever been evicted?", "yesno", true);
+  await question("How many people will live in the unit?", "number", true);
+  await question("Do you smoke?", "yesno", false);
+
+  await client.collection("applications").create({
+    person: priya.id, property: cedar.id, status: "screening",
+    monthly_income: 5400, employer: "Riverside Health", income_verified: true,
+    screening_status: "requested", screening_notes: "Credit + background report requested.",
+    move_in_date: iso(monthsAgo(-1, 1)),
+    answers: [
       { question: "Do you have pets? If yes, what kind?", answer: "One cat, 4 years old" },
       { question: "Have you ever been evicted?", answer: "No" },
       { question: "How many people will live in the unit?", answer: "2" },
       { question: "Do you smoke?", answer: "No" },
-    ]),
-    iso(monthsAgo(-1, 1))
-  );
+    ],
+  });
 
-  const insertLease = db.prepare(
-    `INSERT INTO leases (property_id, unit_id, start_date, end_date, rent, deposit, status, esign_provider, esign_url)
-     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  const insertRoomLease = db.prepare(
-    `INSERT INTO leases (property_id, unit_id, start_date, end_date, rent, deposit, status, esign_provider, esign_url)
-     VALUES (?, ?, ?, ?, ?, ?, 'active', '', '')`
-  );
-  const mapleLease = Number(
-    insertLease.run(maple, iso(monthsAgo(7, 1)), iso(monthsAgo(-5, 1)), 1850, 1850, "active", "documenso", "").lastInsertRowid
-  );
-  const oakLease = Number(
-    insertLease.run(oak, iso(monthsAgo(5, 1)), iso(monthsAgo(-2, 28)), 1250, 1250, "active", "docuseal", "").lastInsertRowid
-  );
-  const cedarLease = Number(
-    insertLease.run(cedar, iso(monthsAgo(-1, 1)), iso(monthsAgo(-13, 1)), 1450, 1450, "draft", "", "").lastInsertRowid
-  );
-  const theoLease = Number(
-    insertRoomLease.run(willow, room1, iso(monthsAgo(4, 1)), iso(monthsAgo(-8, 1)), 850, 850).lastInsertRowid
-  );
-  const amaraLease = Number(
-    insertRoomLease.run(willow, room2, iso(monthsAgo(2, 1)), iso(monthsAgo(-10, 1)), 700, 700).lastInsertRowid
-  );
+  const lease = (data: Record<string, unknown>) => client.collection("leases").create(data);
+  const mapleLease = await lease({ property: maple.id, tenants: [marcus.id], start_date: iso(monthsAgo(7, 1)), end_date: iso(monthsAgo(-5, 1)), rent: 1850, deposit: 1850, status: "active", esign_provider: "opensign" });
+  const oakLease = await lease({ property: oak.id, tenants: [dana.id], start_date: iso(monthsAgo(5, 1)), end_date: iso(monthsAgo(-2, 28)), rent: 1250, deposit: 1250, status: "active", esign_provider: "opensign" });
+  const cedarLease = await lease({ property: cedar.id, tenants: [priya.id], start_date: iso(monthsAgo(-1, 1)), end_date: iso(monthsAgo(-13, 1)), rent: 1450, deposit: 1450, status: "draft" });
+  const theoLease = await lease({ property: willow.id, unit: room1.id, tenants: [theo.id], start_date: iso(monthsAgo(4, 1)), end_date: iso(monthsAgo(-8, 1)), rent: 850, deposit: 850, status: "active" });
+  const amaraLease = await lease({ property: willow.id, unit: room2.id, tenants: [amara.id], start_date: iso(monthsAgo(2, 1)), end_date: iso(monthsAgo(-10, 1)), rent: 700, deposit: 700, status: "active" });
 
-  const linkTenant = db.prepare("INSERT INTO lease_tenants (lease_id, person_id) VALUES (?, ?)");
-  linkTenant.run(mapleLease, marcus);
-  linkTenant.run(oakLease, dana);
-  linkTenant.run(cedarLease, priya);
-  linkTenant.run(theoLease, theo);
-  linkTenant.run(amaraLease, amara);
+  const payment = (data: Record<string, unknown>) => client.collection("payments").create(data);
+  const txn = (data: Record<string, unknown>) => client.collection("transactions").create(data);
 
-  const insertPayment = db.prepare(
-    `INSERT INTO payments (lease_id, person_id, amount, type, due_date, paid_date, method, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  const insertTxn = db.prepare(
-    `INSERT INTO transactions (property_id, date, type, category, amount, description, payment_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-
-  // Paid rent history for the last 6 months (feeds the insights chart).
+  // Six months of collected rent, so the insights chart has history.
   for (let m = 6; m >= 1; m--) {
-    const due = monthsAgo(m, 1);
-    const paidMaple = monthsAgo(m, m === 3 ? 4 : 1);
-    const payMaple = Number(
-      insertPayment.run(mapleLease, marcus, 1850, "rent", iso(due), iso(paidMaple), "ach", "paid", "").lastInsertRowid
-    );
-    insertTxn.run(maple, iso(paidMaple), "income", "rent", 1850, "Rent — Maple Street House", payMaple);
+    const due = iso(monthsAgo(m, 1));
+    const paidMaple = iso(monthsAgo(m, m === 3 ? 4 : 1));
+    const p1 = await payment({ lease: mapleLease.id, person: marcus.id, amount: 1850, type: "rent", due_date: due, paid_date: paidMaple, method: "ach", status: "paid" });
+    await txn({ property: maple.id, date: paidMaple, type: "income", category: "rent", amount: 1850, description: "Rent — Maple Street House", payment: p1.id });
+
     if (m <= 5) {
-      const paidOak = monthsAgo(m, 2);
-      const payOak = Number(
-        insertPayment.run(oakLease, dana, 1250, "rent", iso(due), iso(paidOak), "zelle", "paid", "").lastInsertRowid
-      );
-      insertTxn.run(oak, iso(paidOak), "income", "rent", 1250, "Rent — Oakwood Apartments #2B", payOak);
+      const paidOak = iso(monthsAgo(m, 2));
+      const p2 = await payment({ lease: oakLease.id, person: dana.id, amount: 1250, type: "rent", due_date: due, paid_date: paidOak, method: "zelle", status: "paid" });
+      await txn({ property: oak.id, date: paidOak, type: "income", category: "rent", amount: 1250, description: "Rent — Oakwood Apartments #2B", payment: p2.id });
+    }
+    if (m <= 3) {
+      const paidTheo = iso(monthsAgo(m, 1));
+      const p3 = await payment({ lease: theoLease.id, person: theo.id, amount: 850, type: "rent", due_date: due, paid_date: paidTheo, method: "ach", status: "paid" });
+      await txn({ property: willow.id, date: paidTheo, type: "income", category: "rent", amount: 850, description: "Rent — Willow House Room 1", payment: p3.id });
+    }
+    if (m <= 2) {
+      const paidAmara = iso(monthsAgo(m, 3));
+      const p4 = await payment({ lease: amaraLease.id, person: amara.id, amount: 700, type: "rent", due_date: due, paid_date: paidAmara, method: "venmo", status: "paid" });
+      await txn({ property: willow.id, date: paidAmara, type: "income", category: "rent", amount: 700, description: "Rent — Willow House Room 2", payment: p4.id });
     }
   }
 
-  // This month: Maple paid, Oakwood past due, next month upcoming for both.
-  const thisMonth = monthsAgo(0, 1);
-  const payThis = Number(
-    insertPayment.run(mapleLease, marcus, 1850, "rent", iso(thisMonth), iso(monthsAgo(0, 2)), "ach", "paid", "").lastInsertRowid
-  );
-  insertTxn.run(maple, iso(monthsAgo(0, 2)), "income", "rent", 1850, "Rent — Maple Street House", payThis);
-  insertPayment.run(oakLease, dana, 1250, "rent", iso(thisMonth), null, "", "unpaid", "Reminder sent");
-  // Tenant reported this one from the portal — awaiting landlord approval.
-  db.prepare(
-    `INSERT INTO payments (lease_id, person_id, amount, type, due_date, status, reported_method, reported_date, reported_note, notes)
-     VALUES (?, ?, 75, 'late_fee', ?, 'reported', 'zelle', ?, 'Sent via Zelle this morning — conf #Z8841', '')`
-  ).run(oakLease, dana, iso(monthsAgo(0, 6)), iso(monthsAgo(0, 8)));
-  const nextMonth = monthsAgo(-1, 1);
-  insertPayment.run(mapleLease, marcus, 1850, "rent", iso(nextMonth), null, "", "unpaid", "");
-  insertPayment.run(oakLease, dana, 1250, "rent", iso(nextMonth), null, "", "unpaid", "");
+  // This month: some paid, one past due, one waiting on the landlord's approval.
+  const thisMonth = iso(monthsAgo(0, 1));
+  const paidNow = iso(monthsAgo(0, 2));
+  const current = await payment({ lease: mapleLease.id, person: marcus.id, amount: 1850, type: "rent", due_date: thisMonth, paid_date: paidNow, method: "ach", status: "paid" });
+  await txn({ property: maple.id, date: paidNow, type: "income", category: "rent", amount: 1850, description: "Rent — Maple Street House", payment: current.id });
+  await payment({ lease: theoLease.id, person: theo.id, amount: 850, type: "rent", due_date: thisMonth, paid_date: paidNow, method: "ach", status: "paid" });
+  await payment({ lease: oakLease.id, person: dana.id, amount: 1250, type: "rent", due_date: thisMonth, status: "unpaid", notes: "Reminder sent" });
+  await payment({ lease: amaraLease.id, person: amara.id, amount: 700, type: "rent", due_date: thisMonth, status: "unpaid" });
+  await payment({
+    lease: oakLease.id, person: dana.id, amount: 75, type: "late_fee", due_date: iso(monthsAgo(0, 6)),
+    status: "reported", reported_method: "zelle", reported_date: iso(monthsAgo(0, 8)),
+    reported_note: "Sent via Zelle this morning — conf #Z8841",
+  });
 
-  // Room rent at Willow House: paid history plus this month.
-  for (let m = 3; m >= 0; m--) {
-    const due = monthsAgo(m, 1);
-    if (m > 0) {
-      const paidTheo = monthsAgo(m, 1);
-      const p1 = Number(
-        insertPayment.run(theoLease, theo, 850, "rent", iso(due), iso(paidTheo), "ach", "paid", "").lastInsertRowid
-      );
-      insertTxn.run(willow, iso(paidTheo), "income", "rent", 850, "Rent — Willow House Room 1", p1);
-      if (m <= 2) {
-        const paidAmara = monthsAgo(m, 3);
-        const p2 = Number(
-          insertPayment.run(amaraLease, amara, 700, "rent", iso(due), iso(paidAmara), "venmo", "paid", "").lastInsertRowid
-        );
-        insertTxn.run(willow, iso(paidAmara), "income", "rent", 700, "Rent — Willow House Room 2", p2);
-      }
-    } else {
-      const paidTheo = monthsAgo(0, 2);
-      const p1 = Number(
-        insertPayment.run(theoLease, theo, 850, "rent", iso(due), iso(paidTheo), "ach", "paid", "").lastInsertRowid
-      );
-      insertTxn.run(willow, iso(paidTheo), "income", "rent", 850, "Rent — Willow House Room 1", p1);
-      insertPayment.run(amaraLease, amara, 700, "rent", iso(due), null, "", "unpaid", "");
-    }
-  }
+  const nextMonth = iso(monthsAgo(-1, 1));
+  await payment({ lease: mapleLease.id, person: marcus.id, amount: 1850, type: "rent", due_date: nextMonth, status: "unpaid" });
+  await payment({ lease: oakLease.id, person: dana.id, amount: 1250, type: "rent", due_date: nextMonth, status: "unpaid" });
 
-  // Expenses.
-  insertTxn.run(maple, iso(monthsAgo(4, 12)), "expense", "repairs", 320, "Water heater repair", null);
-  insertTxn.run(oak, iso(monthsAgo(3, 20)), "expense", "utilities", 95, "Water bill (owner paid)", null);
-  insertTxn.run(cedar, iso(monthsAgo(2, 8)), "expense", "turnover", 780, "Paint + new flooring for turnover", null);
-  insertTxn.run(maple, iso(monthsAgo(1, 15)), "expense", "insurance", 410, "Landlord insurance premium", null);
-  insertTxn.run(null, iso(monthsAgo(0, 3)), "expense", "software", 0, "OpenTenant subscription — free forever", null);
+  await txn({ property: maple.id, date: iso(monthsAgo(4, 12)), type: "expense", category: "repairs", amount: 320, description: "Water heater repair" });
+  await txn({ property: oak.id, date: iso(monthsAgo(3, 20)), type: "expense", category: "utilities", amount: 95, description: "Water bill (owner paid)" });
+  await txn({ property: cedar.id, date: iso(monthsAgo(2, 8)), type: "expense", category: "turnover", amount: 780, description: "Paint + new flooring for turnover" });
+  await txn({ property: maple.id, date: iso(monthsAgo(1, 15)), type: "expense", category: "insurance", amount: 410, description: "Landlord insurance premium" });
 
-  const insertMaint = db.prepare(
-    `INSERT INTO maintenance_requests (property_id, person_id, title, description, priority, status, created_at, completed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  insertMaint.run(oak, dana, "Kitchen faucet dripping", "Slow drip from the kitchen faucet, getting worse.", "medium", "new", iso(monthsAgo(0, 3)), null);
-  insertMaint.run(maple, marcus, "Furnace making noise", "Rattling sound when the heat kicks on.", "high", "in_progress", iso(monthsAgo(0, 1)), null);
-  insertMaint.run(maple, marcus, "Gutter cleaning", "Requested seasonal gutter cleaning.", "low", "completed", iso(monthsAgo(2, 10)), iso(monthsAgo(2, 14)));
+  const maintenance = (data: Record<string, unknown>) =>
+    client.collection("maintenance_requests").create(data);
+  await maintenance({ property: oak.id, person: dana.id, title: "Kitchen faucet dripping", description: "Slow drip from the kitchen faucet, getting worse.", priority: "medium", status: "new" });
+  await maintenance({ property: maple.id, person: marcus.id, title: "Furnace making noise", description: "Rattling sound when the heat kicks on.", priority: "high", status: "in_progress" });
+  await maintenance({ property: maple.id, person: marcus.id, title: "Gutter cleaning", description: "Requested seasonal gutter cleaning.", priority: "low", status: "completed", completed_at: iso(monthsAgo(2, 14)) });
 
-  const insertDoc = db.prepare(
-    `INSERT INTO documents (name, type, lease_id, property_id, status, provider, external_url, signed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  insertDoc.run("Maple St Lease 2025-2026", "lease", mapleLease, maple, "signed", "documenso", "", iso(monthsAgo(7, 3)));
-  insertDoc.run("Oakwood 2B Lease Renewal", "lease", oakLease, oak, "signed", "docuseal", "", iso(monthsAgo(5, 2)));
-  insertDoc.run("Cedar Duplex Lease (Priya Sharma)", "lease", cedarLease, cedar, "sent", "documenso", "", null);
-  insertDoc.run("Pet Addendum — Cedar Duplex", "addendum", cedarLease, cedar, "draft", "manual", "", null);
+  const document = (data: Record<string, unknown>) => client.collection("documents").create(data);
+  await document({ name: "Maple St Lease 2025-2026", type: "lease", lease: mapleLease.id, property: maple.id, status: "signed", provider: "opensign", signed_at: iso(monthsAgo(7, 3)) });
+  await document({ name: "Oakwood 2B Lease Renewal", type: "lease", lease: oakLease.id, property: oak.id, status: "signed", provider: "opensign", signed_at: iso(monthsAgo(5, 2)) });
+  await document({ name: "Cedar Duplex Lease (Priya Sharma)", type: "lease", lease: cedarLease.id, property: cedar.id, status: "sent", provider: "opensign" });
+  await document({ name: "Pet Addendum — Cedar Duplex", type: "addendum", lease: cedarLease.id, property: cedar.id, status: "draft", provider: "manual" });
 
-  db.prepare(
-    `INSERT INTO condition_reports (property_id, lease_id, type, status, items, notes, completed_at)
-     VALUES (?, ?, 'move_in', 'completed', ?, 'Completed with tenant at move-in.', ?)`
-  ).run(
-    maple, mapleLease,
-    JSON.stringify([
+  await client.collection("condition_reports").create({
+    property: maple.id, lease: mapleLease.id, type: "move_in", status: "completed",
+    notes: "Completed with tenant at move-in.", completed_at: iso(monthsAgo(7, 1)),
+    items: [
       { area: "Entry / Hallway", condition: "good", notes: "" },
       { area: "Living Room", condition: "good", notes: "Small nail holes patched" },
       { area: "Kitchen", condition: "good", notes: "" },
@@ -273,41 +184,42 @@ export function seedDemoData() {
       { area: "Windows & Doors", condition: "good", notes: "" },
       { area: "Smoke / CO Detectors", condition: "good", notes: "New batteries installed" },
       { area: "Exterior / Yard", condition: "good", notes: "" },
-    ]),
-    iso(monthsAgo(7, 1))
-  );
+    ],
+  });
+  await client.collection("condition_reports").create({
+    property: cedar.id, lease: cedarLease.id, type: "move_in", status: "draft",
+    items: [], notes: "To complete before Priya moves in.",
+  });
 
-  db.prepare(
-    `INSERT INTO condition_reports (property_id, lease_id, type, status, items, notes)
-     VALUES (?, ?, 'move_in', 'draft', '[]', 'To complete before Priya moves in.')`
-  ).run(cedar, cedarLease);
+  const rentChecking = await client.collection("bank_accounts").create({
+    name: "Rent checking", institution: "First National", last4: "4821", kind: "bank",
+    notes: "Main account — most rent lands here.",
+  });
+  await client.collection("bank_accounts").create({
+    name: "Zelle (personal)", institution: "First National", last4: "4821", kind: "zelle",
+    property: oak.id, notes: "Oakwood tenants pay by Zelle.",
+  });
+  await client.collection("bank_accounts").create({
+    name: "Willow House account", institution: "Credit Union", last4: "2210", kind: "bank",
+    property: willow.id, notes: "Room rent for the shared house.",
+  });
 
-  const insertAccount = db.prepare(
-    `INSERT INTO bank_accounts (name, institution, last4, kind, property_id, notes)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  );
-  const rentChecking = Number(
-    insertAccount.run("Rent checking", "First National", "4821", "bank", null,
-      "Main account — most rent lands here.").lastInsertRowid
-  );
-  insertAccount.run("Zelle (personal)", "First National", "4821", "zelle", oak,
-    "Oakwood tenants pay by Zelle.");
-  insertAccount.run("Willow House account", "Credit Union", "2210", "bank", willow,
-    "Room rent for the shared house.");
+  await client.collection("bank_imports").create({
+    account: rentChecking.id, posted_date: iso(monthsAgo(0, 4)),
+    description: "ZELLE FROM MARCUS WEBB SEPT RENT", amount: 1850, source: "zelle",
+    status: "unmatched", fingerprint: "demo-1",
+  });
+  await client.collection("bank_imports").create({
+    account: rentChecking.id, posted_date: iso(monthsAgo(0, 5)),
+    description: "ACH DEPOSIT — CITY UTILITY REFUND", amount: 63.4, source: "bank",
+    status: "unmatched", fingerprint: "demo-2",
+  });
 
-  // Two deposits waiting to be matched, so the review flow has something in it.
-  const insertImport = db.prepare(
-    `INSERT INTO bank_imports (account_id, posted_date, description, amount, source, status, fingerprint)
-     VALUES (?, ?, ?, ?, ?, 'unmatched', ?)`
-  );
-  insertImport.run(rentChecking, iso(monthsAgo(0, 4)), "ZELLE FROM MARCUS WEBB SEPT RENT", 1850, "zelle", "demo-1");
-  insertImport.run(rentChecking, iso(monthsAgo(0, 5)), "ACH DEPOSIT — CITY UTILITY REFUND", 63.4, "bank", "demo-2");
-
-  setSetting("business_name", "Demo Property Management");
-  setSetting("payment_methods", "ACH transfer, Zelle, Venmo, Check");
-  setSetting(
+  await setSetting("business_name", "Demo Property Management");
+  await setSetting("payment_methods", "ACH transfer, Zelle, Venmo, Check");
+  await setSetting(
     "payment_instructions",
     "Zelle: payments@demo-pm.example — include your unit in the memo.\nChecks payable to Demo Property Management, mailed to PO Box 100, Columbus OH."
   );
-  setSetting("esign_provider", "documenso");
+  await setSetting("esign_provider", "opensign");
 }

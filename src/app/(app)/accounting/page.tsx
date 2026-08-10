@@ -12,13 +12,13 @@ import IncomeExpenseChart from "@/components/IncomeExpenseChart";
 
 export const metadata = { title: "Accounting" };
 
-export default function AccountingPage() {
-  const txns = listTransactions();
-  const totals = totalsByType();
-  const monthly = monthlyTotals(6).map((m) => ({ ...m, label: monthLabel(m.month) }));
-  const byCategory = expensesByCategory();
+export default async function AccountingPage() {
+  const txns = await listTransactions();
+  const totals = await totalsByType();
+  const monthly = (await monthlyTotals(6)).map((m) => ({ ...m, label: monthLabel(m.month) }));
+  const byCategory = await expensesByCategory();
   const maxCat = Math.max(1, ...byCategory.map((c) => c.total));
-  const properties = listProperties();
+  const properties = await listProperties();
   const today = new Date().toISOString().slice(0, 10);
 
   return (

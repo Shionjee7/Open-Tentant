@@ -35,12 +35,12 @@ export default async function BankingPage({
   searchParams: Promise<{ imported?: string; skipped?: string; error?: string }>;
 }) {
   const { imported, skipped, error } = await searchParams;
-  const accounts = listBankAccounts();
-  const properties = listProperties();
-  const unmatched = listBankImports("unmatched");
-  const matched = listBankImports("matched");
-  const ignored = listBankImports("ignored");
-  const candidates = openPayments();
+  const accounts = await listBankAccounts();
+  const properties = await listProperties();
+  const unmatched = await listBankImports("unmatched");
+  const matched = await listBankImports("matched");
+  const ignored = await listBankImports("ignored");
+  const candidates = await openPayments();
 
   const unmatchedTotal = unmatched.reduce((sum, d) => sum + d.amount, 0);
 

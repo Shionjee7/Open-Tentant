@@ -19,10 +19,10 @@ export default async function ConditionReportDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const report = getConditionReport(Number(id));
+  const report = await getConditionReport(id);
   if (!report) notFound();
 
-  let items: ConditionItem[] = JSON.parse(report.items || "[]");
+  let items: ConditionItem[] = report.items;
   if (items.length === 0) {
     items = DEFAULT_AREAS.map((area) => ({ area, condition: "", notes: "" }));
   }
@@ -32,7 +32,7 @@ export default async function ConditionReportDetailPage({
       <BackLink href="/condition-reports" label="Condition reports" />
       <PageHeader
         title={`${titleCase(report.type)} report — ${report.property_name}`}
-        subtitle={`Created ${shortDate(report.created_at)}${report.completed_at ? ` · completed ${shortDate(report.completed_at)}` : ""}`}
+        subtitle={`Created ${shortDate(report.created)}${report.completed_at ? ` · completed ${shortDate(report.completed_at)}` : ""}`}
         action={<Badge value={report.status} />}
       />
 

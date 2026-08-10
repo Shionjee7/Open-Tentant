@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { listPayments, reportedPayments, sumPaid, sumPastDue } from "@/lib/data";
-import { getSetting } from "@/lib/db";
+import { getSetting } from "@/lib/data";
 import {
   approveReportedPayment,
   deletePayment,
@@ -12,10 +12,10 @@ import { Badge, EmptyState, PageHeader, StatCard } from "@/components/ui";
 
 export const metadata = { title: "Payments" };
 
-export default function PaymentsPage() {
-  const payments = listPayments();
-  const reported = reportedPayments();
-  const methods = getSetting("payment_methods");
+export default async function PaymentsPage() {
+  const payments = await listPayments();
+  const reported = await reportedPayments();
+  const methods = await getSetting("payment_methods");
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -31,9 +31,9 @@ export default function PaymentsPage() {
       />
 
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">
-        <StatCard label="Collected this month" value={money(sumPaid("start of month"))} tone="good" />
-        <StatCard label="Collected this year" value={money(sumPaid("start of year"))} tone="good" />
-        <StatCard label="Past due" value={money(sumPastDue())} tone={sumPastDue() > 0 ? "bad" : "default"} />
+        <StatCard label="Collected this month" value={money(await sumPaid("month"))} tone="good" />
+        <StatCard label="Collected this year" value={money(await sumPaid("year"))} tone="good" />
+        <StatCard label="Past due" value={money(await sumPastDue())} tone={await sumPastDue() > 0 ? "bad" : "default"} />
       </div>
 
       {reported.length > 0 && (

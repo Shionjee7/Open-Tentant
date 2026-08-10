@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { getSetting } from "@/lib/db";
+import { getSetting } from "@/lib/data";
 
-export default function PublicLayout({ children }: { children: React.ReactNode }) {
-  const business = getSetting("business_name", "OpenTenant");
+export default async function PublicLayout({ children }: { children: React.ReactNode }) {
+  const business = await getSetting("business_name", "OpenTenant");
   return (
     <div className="min-h-screen">
       <header className="border-b border-slate-200 bg-white">

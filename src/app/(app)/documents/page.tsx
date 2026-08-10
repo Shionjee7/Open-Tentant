@@ -1,5 +1,5 @@
 import { listDocuments, listLeases, listProperties } from "@/lib/data";
-import { getSetting } from "@/lib/db";
+import { getSetting } from "@/lib/data";
 import { createDocument, setDocumentStatus } from "@/lib/actions";
 import { shortDate, titleCase } from "@/lib/format";
 import { Badge, PageHeader } from "@/components/ui";
@@ -13,11 +13,11 @@ const NEXT: Record<string, { status: string; label: string }[]> = {
   signed: [],
 };
 
-export default function DocumentsPage() {
-  const docs = listDocuments();
-  const leases = listLeases();
-  const properties = listProperties();
-  const esignBase = getSetting("esign_base_url");
+export default async function DocumentsPage() {
+  const docs = await listDocuments();
+  const leases = await listLeases();
+  const properties = await listProperties();
+  const esignBase = await getSetting("esign_base_url");
 
   return (
     <>
@@ -67,7 +67,7 @@ export default function DocumentsPage() {
                     <td className="td">
                       <div className="font-medium text-ink-900">{d.name}</div>
                       <div className="text-xs text-ink-500">
-                        {titleCase(d.type)} · added {shortDate(d.created_at)}
+                        {titleCase(d.type)} · added {shortDate(d.created)}
                         {d.signed_at ? ` · signed ${shortDate(d.signed_at)}` : ""}
                       </div>
                     </td>

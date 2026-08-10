@@ -1,16 +1,16 @@
 import { listAllUnits, listPeople, listProperties } from "@/lib/data";
-import { getSetting } from "@/lib/db";
+import { getSetting } from "@/lib/data";
 import { createLease } from "@/lib/actions";
 import { BackLink, PageHeader } from "@/components/ui";
 import LeasePropertyPicker from "@/components/LeasePropertyPicker";
 
 export const metadata = { title: "New lease" };
 
-export default function NewLeasePage() {
-  const properties = listProperties();
-  const units = listAllUnits();
-  const people = listPeople().filter((p) => p.stage === "tenant" || p.stage === "applicant");
-  const defaultProvider = getSetting("esign_provider", "documenso");
+export default async function NewLeasePage() {
+  const properties = await listProperties();
+  const units = await listAllUnits();
+  const people = (await listPeople()).filter((p) => p.stage === "tenant" || p.stage === "applicant");
+  const defaultProvider = await getSetting("esign_provider", "documenso");
 
   return (
     <>

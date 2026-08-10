@@ -1,4 +1,4 @@
-import { getSetting } from "./db";
+import { getSetting } from "./data";
 
 /**
  * OpenSign integration.
@@ -27,22 +27,23 @@ export type OpenSignConfig = {
   token: string;
 };
 
-export function openSignConfig(): OpenSignConfig {
+export async function openSignConfig(): Promise<OpenSignConfig> {
   return {
     appUrl:
       process.env.OPENSIGN_APP_URL?.trim() ||
-      getSetting("esign_base_url") ||
+      (await getSetting("esign_base_url")) ||
       "https://app.opensignlabs.com",
     apiUrl:
       process.env.OPENSIGN_API_URL?.trim() ||
-      getSetting("opensign_api_url") ||
+      (await getSetting("opensign_api_url")) ||
       "https://app.opensignlabs.com/api/v1.2",
-    token: process.env.OPENSIGN_API_TOKEN?.trim() || getSetting("opensign_api_token"),
+    token:
+      process.env.OPENSIGN_API_TOKEN?.trim() || (await getSetting("opensign_api_token")),
   };
 }
 
-export function hasApiAccess(): boolean {
-  return Boolean(openSignConfig().token);
+export async function hasApiAccess(): Promise<boolean> {
+  return Boolean((await openSignConfig()).token);
 }
 
 export type SignerInput = {
@@ -65,7 +66,7 @@ export async function createSignatureRequest(options: {
   signers: SignerInput[];
   message?: string;
 }): Promise<CreateDocumentResult> {
-  const config = openSignConfig();
+  const config = await openSignConfig();
   if (!config.token) {
     return { ok: false, error: "No OpenSign API token configured." };
   }
@@ -129,7 +130,7 @@ export async function createSignatureRequest(options: {
 export async function fetchDocumentStatus(
   documentId: string
 ): Promise<{ status: string; signedAt: string | null } | null> {
-  const config = openSignConfig();
+  const config = await openSignConfig();
   if (!config.token || !documentId) return null;
 
   try {
@@ -164,6 +165,6 @@ export async function fetchDocumentStatus(
 }
 
 /** Link to your OpenSign instance, where you upload the lease and send it. */
-export function openSignAppUrl(): string {
-  return openSignConfig().appUrl.replace(/\/$/, "");
+export async function openSignAppUrl(): Promise<string> {
+  return (await openSignConfig()).appUrl.replace(/\/$/, "");
 }

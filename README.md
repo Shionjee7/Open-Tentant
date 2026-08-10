@@ -3,8 +3,8 @@
 **Free, open-source property management for landlords.**
 
 Listings, applications, screening, leases, rent collection, maintenance, and accounting —
-self-hosted, with no subscription and no cut taken from rent. Your data lives in a single
-file on your own machine.
+self-hosted, with no subscription and no cut taken from rent. Your data stays on your own
+machine, in a database you control.
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
@@ -40,7 +40,8 @@ file on your own machine.
 
 ## Quick start
 
-Requires **Node.js ≥ 22.13** (the database uses Node's built-in SQLite — no native builds).
+Requires **Node.js ≥ 22.13**. The PocketBase database binary installs through npm, so there is
+nothing else to download.
 
 ```bash
 git clone https://github.com/Shionjee7/Open-Tentant.git
@@ -48,12 +49,13 @@ cd Open-Tentant
 npm run setup
 ```
 
-That installs, builds, and starts the app. Open http://localhost:3000 and click **Load demo
-data** to explore every module with sample records, or add your first property and start
-clean.
+That installs dependencies, builds, starts the database, and serves the app. Open
+http://localhost:3000 and click **Load demo data** to explore every module with sample records,
+or add your first property and start clean.
 
-For day-to-day development use `npm run dev` instead. The database is created automatically
-at `data/opentenant.db` — back up that file and you've backed up everything.
+For day-to-day development, run `npm run pb` in one terminal and `npm run dev` in another.
+Everything lives in `data/pb_data/` — back up that folder and you've backed up everything. The
+database console is at http://127.0.0.1:8090/_/.
 
 ## Deploy it (get a real URL)
 
@@ -86,7 +88,9 @@ Every setting is optional — the app runs with none of them.
 | Variable | What it does |
 |---|---|
 | `ADMIN_PASSWORD` | Enables the login gate. Required for any public deployment. |
-| `DATA_DIR` | Where the SQLite file lives. Point at your mounted volume. |
+| `DATA_DIR` | Where the database lives. Point at your mounted volume. |
+| `PB_ADMIN_PASSWORD` | Database console password. Change it on any shared machine. |
+| `PB_PORT` / `PB_URL` | Where PocketBase listens / how the app reaches it. |
 | `PORT` | Port to listen on (default 3000). |
 | `GEOCODER_URL` | Your own Nominatim/Photon instance for address autocomplete. |
 | `GEOCODER_CONTACT` | Contact string sent with geocoding requests. |
@@ -95,7 +99,8 @@ Every setting is optional — the app runs with none of them.
 
 - [Next.js 15](https://nextjs.org) (App Router, Server Components + Server Actions)
 - [Tailwind CSS 4](https://tailwindcss.com)
-- SQLite via Node's built-in `node:sqlite` — no ORM, no native builds, transparent SQL
+- [PocketBase](https://github.com/pocketbase/pocketbase) (MIT) — database, REST API, and admin
+  console, running as its own process with SQLite storage
 - TypeScript
 
 Everything it depends on is free and open source. Schema changes migrate automatically on
@@ -107,11 +112,10 @@ startup, so upgrading is `git pull` with no manual steps.
 - [ ] Email notifications (rent reminders, application received, maintenance updates)
 - [ ] Optional Stripe integration for in-app card & ACH payments
 - [ ] Direct e-sign API integration instead of pasted links
-- [ ] File uploads (lease PDFs, maintenance photos, condition-report photos)
+- [ ] File uploads in the UI (the collections already accept them)
 - [ ] Native PDF statement parsing (today: paste the text, or import CSV)
 - [ ] Listing syndication feeds
 - [ ] Rent reporting to credit bureaus
-- [ ] Postgres option for larger portfolios
 
 Contributions welcome — this project exists so no landlord has to pay rent on their own
 software.

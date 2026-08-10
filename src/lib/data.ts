@@ -1,9 +1,12 @@
-import { getDb } from "./db";
+import { pb } from "./pb";
 import type {
   Application,
+  BankAccount,
+  BankImport,
   ConditionReport,
   CustomQuestion,
   Doc,
+  Id,
   Lease,
   MaintenanceRequest,
   Payment,
@@ -11,470 +14,587 @@ import type {
   Property,
   Txn,
   Unit,
-  BankAccount,
-  BankImport,
 } from "./types";
 
 /**
- * node:sqlite hands back rows with a null prototype, which React refuses to
- * serialize when a Server Component passes data to a Client Component. Copying
- * each row into a plain object here means every query result is safe to pass
- * anywhere, rather than blowing up only on the pages that cross that boundary.
+ * Reads for the whole app.
+ *
+ * PocketBase's record API has no SQL joins, so related names and totals are
+ * resolved here in TypeScript. A landlord portfolio is small — tens of
+ * properties, hundreds of payments — so fetching a collection and joining in
+ * memory is both fast enough and far clearer than contorting filters.
  */
-function plain<T>(row: unknown): T {
-  return { ...(row as Record<string, unknown>) } as T;
+
+const ALL = { perPage: 500, sort: "-created" } as const;
+
+async function fetchAll<T>(collection: string, options: Record<string, unknown> = {}): Promise<T[]> {
+  const client = await pb();
+  const records = await client
+    .collection(collection)
+    .getFullList({ ...ALL, ...options });
+  return records as unknown as T[];
 }
 
-function all<T>(sql: string, ...params: (string | number)[]): T[] {
-  return (getDb().prepare(sql).all(...params) as unknown[]).map((row) => plain<T>(row));
+async function fetchOne<T>(collection: string, id: Id): Promise<T | undefined> {
+  if (!id) return undefined;
+  try {
+    const client = await pb();
+    return (await client.collection(collection).getOne(id)) as unknown as T;
+  } catch {
+    return undefined;
+  }
 }
 
-function one<T>(sql: string, ...params: (string | number)[]): T | undefined {
-  const row = getDb().prepare(sql).get(...params);
-  return row === undefined ? undefined : plain<T>(row);
+function byId<T extends { id: Id }>(items: T[]): Map<Id, T> {
+  return new Map(items.map((item) => [item.id, item]));
+}
+
+function fullName(person: Person | undefined): string {
+  return person ? `${person.first_name} ${person.last_name}`.trim() : "";
+}
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function startOfMonth(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+}
+
+function startOfYear(): string {
+  return `${new Date().getFullYear()}-01-01`;
 }
 
 // ---------- Properties ----------
 
-const PROPERTY_SELECT = `
-  SELECT p.*,
-         (SELECT COUNT(*) FROM units u WHERE u.property_id = p.id) AS room_count,
-         (SELECT COUNT(*) FROM units u WHERE u.property_id = p.id AND u.status = 'vacant') AS rooms_vacant
-  FROM properties p`;
-
-export function listProperties(): Property[] {
-  return all<Property>(`${PROPERTY_SELECT} ORDER BY p.created_at DESC`);
+export async function listProperties(): Promise<Property[]> {
+  const [properties, units] = await Promise.all([
+    fetchAll<Property>("properties"),
+    fetchAll<Unit>("units"),
+  ]);
+  return properties.map((property) => {
+    const rooms = units.filter((u) => u.property === property.id);
+    return {
+      ...property,
+      room_count: rooms.length,
+      rooms_vacant: rooms.filter((r) => r.status === "vacant").length,
+    };
+  });
 }
 
-export function listedProperties(): Property[] {
-  return all<Property>(
-    `${PROPERTY_SELECT}
-     WHERE p.listed = 1 AND p.rental_type = 'whole'
-     ORDER BY p.priority_listing DESC, p.created_at DESC`
-  );
+export async function listedProperties(): Promise<Property[]> {
+  const properties = await listProperties();
+  return properties
+    .filter((p) => p.listed && p.rental_type !== "by_room")
+    .sort((a, b) => Number(b.priority_listing) - Number(a.priority_listing));
 }
 
-export function getProperty(id: number): Property | undefined {
-  return one<Property>(`${PROPERTY_SELECT} WHERE p.id = ?`, id);
+export async function getProperty(id: Id): Promise<Property | undefined> {
+  const property = await fetchOne<Property>("properties", id);
+  if (!property) return undefined;
+  const rooms = await listUnits(id);
+  return {
+    ...property,
+    room_count: rooms.length,
+    rooms_vacant: rooms.filter((r) => r.status === "vacant").length,
+  };
 }
 
 // ---------- Rooms (units) ----------
 
-const UNIT_SELECT = `
-  SELECT u.*,
-         p.name AS property_name,
-         p.address AS property_address,
-         p.city AS property_city,
-         p.state AS property_state,
-         p.amenities AS property_amenities,
-         (SELECT group_concat(pe.first_name || ' ' || pe.last_name, ', ')
-          FROM people pe WHERE pe.unit_id = u.id AND pe.stage = 'tenant') AS tenant_names
-  FROM units u JOIN properties p ON p.id = u.property_id`;
-
-export function listUnits(propertyId: number): Unit[] {
-  return all<Unit>(`${UNIT_SELECT} WHERE u.property_id = ? ORDER BY u.id`, propertyId);
+async function decorateUnits(units: Unit[]): Promise<Unit[]> {
+  const [properties, people] = await Promise.all([
+    fetchAll<Property>("properties"),
+    fetchAll<Person>("people"),
+  ]);
+  const propertyMap = byId(properties);
+  return units.map((unit) => {
+    const property = propertyMap.get(unit.property);
+    const tenants = people.filter((p) => p.unit === unit.id && p.stage === "tenant");
+    return {
+      ...unit,
+      property_name: property?.name,
+      property_address: property?.address,
+      property_city: property?.city,
+      property_state: property?.state,
+      property_amenities: property?.amenities,
+      tenant_names: tenants.map(fullName).join(", ") || undefined,
+    };
+  });
 }
 
-export function getUnit(id: number): Unit | undefined {
-  return one<Unit>(`${UNIT_SELECT} WHERE u.id = ?`, id);
+export async function listUnits(propertyId: Id): Promise<Unit[]> {
+  const units = await fetchAll<Unit>("units", { sort: "created" });
+  return decorateUnits(units.filter((u) => u.property === propertyId));
 }
 
-export function listAllUnits(): Unit[] {
-  return all<Unit>(`${UNIT_SELECT} ORDER BY p.name, u.id`);
+export async function listAllUnits(): Promise<Unit[]> {
+  return decorateUnits(await fetchAll<Unit>("units", { sort: "created" }));
 }
 
-/** Vacant, listed rooms in by-the-room properties — shown individually on the listings page. */
-export function listedRooms(): Unit[] {
-  return all<Unit>(
-    `${UNIT_SELECT}
-     WHERE p.listed = 1 AND p.rental_type = 'by_room' AND u.listed = 1 AND u.status = 'vacant'
-     ORDER BY p.priority_listing DESC, p.name, u.id`
+export async function getUnit(id: Id): Promise<Unit | undefined> {
+  const unit = await fetchOne<Unit>("units", id);
+  if (!unit) return undefined;
+  return (await decorateUnits([unit]))[0];
+}
+
+/** Vacant, listed rooms in by-the-room properties — listed individually. */
+export async function listedRooms(): Promise<Unit[]> {
+  const [units, properties] = await Promise.all([listAllUnits(), fetchAll<Property>("properties")]);
+  const listedByRoom = new Set(
+    properties.filter((p) => p.listed && p.rental_type === "by_room").map((p) => p.id)
   );
+  return units.filter((u) => listedByRoom.has(u.property) && u.listed && u.status === "vacant");
 }
 
 // ---------- People ----------
 
-export function listPeople(stage?: string): Person[] {
-  const base = `SELECT p.*, pr.name AS property_name, u.name AS unit_name
-     FROM people p
-     LEFT JOIN properties pr ON pr.id = p.property_id
-     LEFT JOIN units u ON u.id = p.unit_id`;
-  if (stage) {
-    return all<Person>(`${base} WHERE p.stage = ? ORDER BY p.created_at DESC`, stage);
-  }
-  return all<Person>(`${base} ORDER BY p.created_at DESC`);
+async function decoratePeople(people: Person[]): Promise<Person[]> {
+  const [properties, units] = await Promise.all([
+    fetchAll<Property>("properties"),
+    fetchAll<Unit>("units"),
+  ]);
+  const propertyMap = byId(properties);
+  const unitMap = byId(units);
+  return people.map((person) => ({
+    ...person,
+    property_name: person.property ? propertyMap.get(person.property)?.name : undefined,
+    unit_name: person.unit ? unitMap.get(person.unit)?.name : undefined,
+  }));
 }
 
-export function getPerson(id: number): Person | undefined {
-  return one<Person>(
-    `SELECT p.*, pr.name AS property_name, u.name AS unit_name
-     FROM people p
-     LEFT JOIN properties pr ON pr.id = p.property_id
-     LEFT JOIN units u ON u.id = p.unit_id
-     WHERE p.id = ?`,
-    id
-  );
+export async function listPeople(stage?: string): Promise<Person[]> {
+  const people = await fetchAll<Person>("people");
+  return decoratePeople(stage ? people.filter((p) => p.stage === stage) : people);
 }
 
-export function getPersonByToken(token: string): Person | undefined {
+export async function getPerson(id: Id): Promise<Person | undefined> {
+  const person = await fetchOne<Person>("people", id);
+  if (!person) return undefined;
+  return (await decoratePeople([person]))[0];
+}
+
+export async function getPersonByToken(token: string): Promise<Person | undefined> {
   if (!token) return undefined;
-  return one<Person>(
-    `SELECT p.*, pr.name AS property_name, u.name AS unit_name
-     FROM people p
-     LEFT JOIN properties pr ON pr.id = p.property_id
-     LEFT JOIN units u ON u.id = p.unit_id
-     WHERE p.portal_token = ?`,
-    token
-  );
+  const people = await fetchAll<Person>("people");
+  const match = people.find((p) => p.portal_token === token);
+  if (!match) return undefined;
+  return (await decoratePeople([match]))[0];
 }
 
-export function countPeopleByStage(): Record<string, number> {
-  const rows = all<{ stage: string; n: number }>(
-    "SELECT stage, COUNT(*) AS n FROM people GROUP BY stage"
-  );
-  const out: Record<string, number> = { lead: 0, applicant: 0, tenant: 0, past: 0 };
-  for (const r of rows) out[r.stage] = r.n;
-  return out;
+export async function countPeopleByStage(): Promise<Record<string, number>> {
+  const people = await fetchAll<Person>("people");
+  const counts: Record<string, number> = { lead: 0, applicant: 0, tenant: 0, past: 0 };
+  for (const person of people) counts[person.stage] = (counts[person.stage] ?? 0) + 1;
+  return counts;
 }
 
 // ---------- Custom questions ----------
 
-export function listQuestions(includeArchived = false): CustomQuestion[] {
-  return includeArchived
-    ? all<CustomQuestion>("SELECT * FROM custom_questions ORDER BY id")
-    : all<CustomQuestion>("SELECT * FROM custom_questions WHERE archived = 0 ORDER BY id");
+export async function listQuestions(includeArchived = false): Promise<CustomQuestion[]> {
+  const questions = await fetchAll<CustomQuestion>("custom_questions", { sort: "created" });
+  return includeArchived ? questions : questions.filter((q) => !q.archived);
 }
 
 // ---------- Applications ----------
 
-export function listApplications(): Application[] {
-  return all<Application>(
-    `SELECT a.*,
-            p.first_name || ' ' || p.last_name AS applicant_name,
-            p.email AS applicant_email,
-            pr.name AS property_name,
-            pr.rent AS property_rent,
-            u.name AS unit_name,
-            u.rent AS unit_rent
-     FROM applications a
-     JOIN people p ON p.id = a.person_id
-     LEFT JOIN properties pr ON pr.id = a.property_id
-     LEFT JOIN units u ON u.id = a.unit_id
-     ORDER BY a.created_at DESC`
-  );
+async function decorateApplications(applications: Application[]): Promise<Application[]> {
+  const [people, properties, units] = await Promise.all([
+    fetchAll<Person>("people"),
+    fetchAll<Property>("properties"),
+    fetchAll<Unit>("units"),
+  ]);
+  const peopleMap = byId(people);
+  const propertyMap = byId(properties);
+  const unitMap = byId(units);
+  return applications.map((application) => {
+    const person = peopleMap.get(application.person);
+    const property = application.property ? propertyMap.get(application.property) : undefined;
+    const unit = application.unit ? unitMap.get(application.unit) : undefined;
+    return {
+      ...application,
+      answers: Array.isArray(application.answers) ? application.answers : [],
+      applicant_name: fullName(person),
+      applicant_email: person?.email,
+      property_name: property?.name,
+      property_rent: property?.rent,
+      unit_name: unit?.name,
+      unit_rent: unit?.rent,
+    };
+  });
 }
 
-export function getApplication(id: number): Application | undefined {
-  return one<Application>(
-    `SELECT a.*,
-            p.first_name || ' ' || p.last_name AS applicant_name,
-            p.email AS applicant_email,
-            pr.name AS property_name,
-            pr.rent AS property_rent,
-            u.name AS unit_name,
-            u.rent AS unit_rent
-     FROM applications a
-     JOIN people p ON p.id = a.person_id
-     LEFT JOIN properties pr ON pr.id = a.property_id
-     LEFT JOIN units u ON u.id = a.unit_id
-     WHERE a.id = ?`,
-    id
-  );
+export async function listApplications(): Promise<Application[]> {
+  return decorateApplications(await fetchAll<Application>("applications"));
+}
+
+export async function getApplication(id: Id): Promise<Application | undefined> {
+  const application = await fetchOne<Application>("applications", id);
+  if (!application) return undefined;
+  return (await decorateApplications([application]))[0];
 }
 
 // ---------- Leases ----------
 
-export function listLeases(): Lease[] {
-  return all<Lease>(
-    `SELECT l.*, pr.name AS property_name, u.name AS unit_name,
-            (SELECT group_concat(pe.first_name || ' ' || pe.last_name, ', ')
-             FROM lease_tenants lt JOIN people pe ON pe.id = lt.person_id
-             WHERE lt.lease_id = l.id) AS tenant_names
-     FROM leases l
-     JOIN properties pr ON pr.id = l.property_id
-     LEFT JOIN units u ON u.id = l.unit_id
-     ORDER BY l.created_at DESC`
-  );
+async function decorateLeases(leases: Lease[]): Promise<Lease[]> {
+  const [properties, units, people] = await Promise.all([
+    fetchAll<Property>("properties"),
+    fetchAll<Unit>("units"),
+    fetchAll<Person>("people"),
+  ]);
+  const propertyMap = byId(properties);
+  const unitMap = byId(units);
+  const peopleMap = byId(people);
+  return leases.map((lease) => ({
+    ...lease,
+    tenants: Array.isArray(lease.tenants) ? lease.tenants : [],
+    property_name: propertyMap.get(lease.property)?.name,
+    unit_name: lease.unit ? unitMap.get(lease.unit)?.name : undefined,
+    tenant_names:
+      (Array.isArray(lease.tenants) ? lease.tenants : [])
+        .map((id) => fullName(peopleMap.get(id)))
+        .filter(Boolean)
+        .join(", ") || undefined,
+  }));
 }
 
-export function getLease(id: number): Lease | undefined {
-  return one<Lease>(
-    `SELECT l.*, pr.name AS property_name, u.name AS unit_name,
-            (SELECT group_concat(pe.first_name || ' ' || pe.last_name, ', ')
-             FROM lease_tenants lt JOIN people pe ON pe.id = lt.person_id
-             WHERE lt.lease_id = l.id) AS tenant_names
-     FROM leases l
-     JOIN properties pr ON pr.id = l.property_id
-     LEFT JOIN units u ON u.id = l.unit_id
-     WHERE l.id = ?`,
-    id
-  );
+export async function listLeases(): Promise<Lease[]> {
+  return decorateLeases(await fetchAll<Lease>("leases"));
 }
 
-export function leaseTenantIds(leaseId: number): number[] {
-  return all<{ person_id: number }>(
-    "SELECT person_id FROM lease_tenants WHERE lease_id = ?",
-    leaseId
-  ).map((r) => r.person_id);
+export async function getLease(id: Id): Promise<Lease | undefined> {
+  const lease = await fetchOne<Lease>("leases", id);
+  if (!lease) return undefined;
+  return (await decorateLeases([lease]))[0];
 }
 
-export function leasesExpiringWithin(days: number): Lease[] {
-  return all<Lease>(
-    `SELECT l.*, pr.name AS property_name, u.name AS unit_name,
-            (SELECT group_concat(pe.first_name || ' ' || pe.last_name, ', ')
-             FROM lease_tenants lt JOIN people pe ON pe.id = lt.person_id
-             WHERE lt.lease_id = l.id) AS tenant_names
-     FROM leases l JOIN properties pr ON pr.id = l.property_id
-     LEFT JOIN units u ON u.id = l.unit_id
-     WHERE l.status = 'active'
-       AND date(l.end_date) BETWEEN date('now') AND date('now', '+' || ? || ' days')
-     ORDER BY l.end_date`,
-    days
-  );
+export async function leaseTenantIds(leaseId: Id): Promise<Id[]> {
+  const lease = await fetchOne<Lease>("leases", leaseId);
+  return Array.isArray(lease?.tenants) ? lease.tenants : [];
+}
+
+export async function leasesExpiringWithin(days: number): Promise<Lease[]> {
+  const leases = await listLeases();
+  const limit = new Date();
+  limit.setDate(limit.getDate() + days);
+  const limitIso = limit.toISOString().slice(0, 10);
+  const now = today();
+  return leases
+    .filter((l) => l.status === "active" && l.end_date >= now && l.end_date <= limitIso)
+    .sort((a, b) => a.end_date.localeCompare(b.end_date));
 }
 
 // ---------- Payments ----------
 
-const PAYMENT_SELECT = `
-  SELECT pay.*,
-         pe.first_name || ' ' || pe.last_name AS tenant_name,
-         pr.name AS property_name
-  FROM payments pay
-  LEFT JOIN people pe ON pe.id = pay.person_id
-  LEFT JOIN leases l ON l.id = pay.lease_id
-  LEFT JOIN properties pr ON pr.id = l.property_id`;
-
-export function listPayments(): Payment[] {
-  return all<Payment>(`${PAYMENT_SELECT} ORDER BY pay.due_date DESC`);
+async function decoratePayments(payments: Payment[]): Promise<Payment[]> {
+  const [people, leases, properties] = await Promise.all([
+    fetchAll<Person>("people"),
+    fetchAll<Lease>("leases"),
+    fetchAll<Property>("properties"),
+  ]);
+  const peopleMap = byId(people);
+  const leaseMap = byId(leases);
+  const propertyMap = byId(properties);
+  return payments.map((payment) => {
+    const lease = payment.lease ? leaseMap.get(payment.lease) : undefined;
+    const property = lease ? propertyMap.get(lease.property) : undefined;
+    return {
+      ...payment,
+      tenant_name: payment.person ? fullName(peopleMap.get(payment.person)) : undefined,
+      property_name: property?.name,
+    };
+  });
 }
 
-export function pastDuePayments(): Payment[] {
-  return all<Payment>(
-    `${PAYMENT_SELECT}
-     WHERE pay.status = 'unpaid' AND date(pay.due_date) < date('now')
-     ORDER BY pay.due_date`
+export async function listPayments(): Promise<Payment[]> {
+  return decoratePayments(await fetchAll<Payment>("payments", { sort: "-due_date" }));
+}
+
+export async function pastDuePayments(): Promise<Payment[]> {
+  const payments = await listPayments();
+  const now = today();
+  return payments
+    .filter((p) => p.status === "unpaid" && p.due_date < now)
+    .sort((a, b) => a.due_date.localeCompare(b.due_date));
+}
+
+export async function upcomingPayments(): Promise<Payment[]> {
+  const payments = await listPayments();
+  const now = today();
+  return payments
+    .filter((p) => p.status === "unpaid" && p.due_date >= now)
+    .sort((a, b) => a.due_date.localeCompare(b.due_date))
+    .slice(0, 8);
+}
+
+export async function reportedPayments(): Promise<Payment[]> {
+  const payments = await listPayments();
+  return payments.filter((p) => p.status === "reported");
+}
+
+/** Every payment still awaiting money — matched against bank deposits. */
+export async function openPayments(): Promise<Payment[]> {
+  const payments = await listPayments();
+  return payments.filter((p) => p.status === "unpaid" || p.status === "reported");
+}
+
+export async function paymentsForPerson(personId: Id): Promise<Payment[]> {
+  const [payments, leases] = await Promise.all([listPayments(), fetchAll<Lease>("leases")]);
+  const theirLeases = new Set(
+    leases.filter((l) => (l.tenants ?? []).includes(personId)).map((l) => l.id)
   );
+  return payments.filter((p) => p.person === personId || (p.lease && theirLeases.has(p.lease)));
 }
 
-export function upcomingPayments(): Payment[] {
-  return all<Payment>(
-    `${PAYMENT_SELECT}
-     WHERE pay.status = 'unpaid' AND date(pay.due_date) >= date('now')
-     ORDER BY pay.due_date LIMIT 8`
-  );
+export async function sumPaid(since: "month" | "year"): Promise<number> {
+  const payments = await fetchAll<Payment>("payments");
+  const from = since === "month" ? startOfMonth() : startOfYear();
+  return payments
+    .filter((p) => p.status === "paid" && p.paid_date && p.paid_date >= from)
+    .reduce((total, p) => total + p.amount, 0);
 }
 
-export function reportedPayments(): Payment[] {
-  return all<Payment>(
-    `${PAYMENT_SELECT} WHERE pay.status = 'reported' ORDER BY pay.reported_date DESC`
-  );
+export async function sumPastDue(): Promise<number> {
+  const payments = await fetchAll<Payment>("payments");
+  const now = today();
+  return payments
+    .filter((p) => p.status === "unpaid" && p.due_date < now)
+    .reduce((total, p) => total + p.amount, 0);
 }
 
-export function paymentsForPerson(personId: number): Payment[] {
-  return all<Payment>(
-    `${PAYMENT_SELECT}
-     WHERE pay.person_id = ?
-        OR pay.lease_id IN (SELECT lease_id FROM lease_tenants WHERE person_id = ?)
-     ORDER BY pay.due_date DESC`,
-    personId,
-    personId
-  );
-}
-
-export function activeLeaseForPerson(personId: number): Lease | undefined {
-  return one<Lease>(
-    `SELECT l.*, pr.name AS property_name, u.name AS unit_name,
-            (SELECT group_concat(pe.first_name || ' ' || pe.last_name, ', ')
-             FROM lease_tenants lt JOIN people pe ON pe.id = lt.person_id
-             WHERE lt.lease_id = l.id) AS tenant_names
-     FROM leases l
-     JOIN properties pr ON pr.id = l.property_id
-     LEFT JOIN units u ON u.id = l.unit_id
-     JOIN lease_tenants lt2 ON lt2.lease_id = l.id AND lt2.person_id = ?
-     WHERE l.status IN ('active', 'signed', 'sent')
-     ORDER BY l.start_date DESC LIMIT 1`,
-    personId
-  );
-}
-
-export function maintenanceForPerson(personId: number): MaintenanceRequest[] {
-  return all<MaintenanceRequest>(
-    `SELECT m.*, pr.name AS property_name,
-            pe.first_name || ' ' || pe.last_name AS tenant_name
-     FROM maintenance_requests m
-     JOIN properties pr ON pr.id = m.property_id
-     LEFT JOIN people pe ON pe.id = m.person_id
-     WHERE m.person_id = ?
-     ORDER BY m.created_at DESC`,
-    personId
-  );
-}
-
-export function sumPaid(sinceExpr: string): number {
-  const row = one<{ total: number | null }>(
-    `SELECT SUM(amount) AS total FROM payments
-     WHERE status = 'paid' AND date(paid_date) >= date('now', ?)`,
-    sinceExpr
-  );
-  return row?.total ?? 0;
-}
-
-export function sumPastDue(): number {
-  const row = one<{ total: number | null }>(
-    `SELECT SUM(amount) AS total FROM payments
-     WHERE status = 'unpaid' AND date(due_date) < date('now')`
-  );
-  return row?.total ?? 0;
-}
-
-/** Every payment still awaiting money — the pool we match bank deposits against. */
-export function openPayments(): Payment[] {
-  return all<Payment>(
-    `${PAYMENT_SELECT} WHERE pay.status IN ('unpaid','reported') ORDER BY pay.due_date DESC`
-  );
-}
-
-// ---------- Bank accounts & statement imports ----------
-
-export function listBankAccounts(): BankAccount[] {
-  return all<BankAccount>(
-    `SELECT b.*, pr.name AS property_name
-     FROM bank_accounts b LEFT JOIN properties pr ON pr.id = b.property_id
-     ORDER BY b.created_at`
-  );
-}
-
-export function listBankImports(status?: string): BankImport[] {
-  const base = `
-    SELECT bi.*, ba.name AS account_name,
-           pe.first_name || ' ' || pe.last_name AS matched_tenant
-    FROM bank_imports bi
-    LEFT JOIN bank_accounts ba ON ba.id = bi.account_id
-    LEFT JOIN people pe ON pe.id = bi.person_id`;
-  return status
-    ? all<BankImport>(`${base} WHERE bi.status = ? ORDER BY bi.posted_date DESC`, status)
-    : all<BankImport>(`${base} ORDER BY bi.posted_date DESC`);
+export async function activeLeaseForPerson(personId: Id): Promise<Lease | undefined> {
+  const leases = await listLeases();
+  return leases
+    .filter(
+      (l) =>
+        (l.tenants ?? []).includes(personId) &&
+        ["active", "signed", "sent"].includes(l.status)
+    )
+    .sort((a, b) => b.start_date.localeCompare(a.start_date))[0];
 }
 
 // ---------- Maintenance ----------
 
-export function listMaintenance(): MaintenanceRequest[] {
-  return all<MaintenanceRequest>(
-    `SELECT m.*, pr.name AS property_name,
-            pe.first_name || ' ' || pe.last_name AS tenant_name
-     FROM maintenance_requests m
-     JOIN properties pr ON pr.id = m.property_id
-     LEFT JOIN people pe ON pe.id = m.person_id
-     ORDER BY CASE m.status WHEN 'new' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
-              m.created_at DESC`
+async function decorateMaintenance(requests: MaintenanceRequest[]): Promise<MaintenanceRequest[]> {
+  const [properties, people] = await Promise.all([
+    fetchAll<Property>("properties"),
+    fetchAll<Person>("people"),
+  ]);
+  const propertyMap = byId(properties);
+  const peopleMap = byId(people);
+  return requests.map((request) => ({
+    ...request,
+    property_name: propertyMap.get(request.property)?.name,
+    tenant_name: request.person ? fullName(peopleMap.get(request.person)) : undefined,
+  }));
+}
+
+const MAINTENANCE_ORDER: Record<string, number> = { new: 0, in_progress: 1, completed: 2, cancelled: 3 };
+
+export async function listMaintenance(): Promise<MaintenanceRequest[]> {
+  const requests = await decorateMaintenance(await fetchAll<MaintenanceRequest>("maintenance_requests"));
+  return requests.sort(
+    (a, b) => (MAINTENANCE_ORDER[a.status] ?? 9) - (MAINTENANCE_ORDER[b.status] ?? 9)
   );
 }
 
-export function countOpenMaintenance(): number {
-  const row = one<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM maintenance_requests WHERE status IN ('new','in_progress')"
-  );
-  return row?.n ?? 0;
+export async function maintenanceForPerson(personId: Id): Promise<MaintenanceRequest[]> {
+  const requests = await listMaintenance();
+  return requests.filter((r) => r.person === personId);
+}
+
+export async function countOpenMaintenance(): Promise<number> {
+  const requests = await fetchAll<MaintenanceRequest>("maintenance_requests");
+  return requests.filter((r) => r.status === "new" || r.status === "in_progress").length;
 }
 
 // ---------- Transactions / accounting ----------
 
-export function listTransactions(): Txn[] {
-  return all<Txn>(
-    `SELECT t.*, pr.name AS property_name
-     FROM transactions t LEFT JOIN properties pr ON pr.id = t.property_id
-     ORDER BY t.date DESC, t.id DESC`
+export async function listTransactions(): Promise<Txn[]> {
+  const [transactions, properties] = await Promise.all([
+    fetchAll<Txn>("transactions", { sort: "-date" }),
+    fetchAll<Property>("properties"),
+  ]);
+  const propertyMap = byId(properties);
+  return transactions.map((t) => ({
+    ...t,
+    property_name: t.property ? propertyMap.get(t.property)?.name : undefined,
+  }));
+}
+
+export async function monthlyTotals(months: number) {
+  const transactions = await fetchAll<Txn>("transactions");
+  const buckets = new Map<string, { month: string; income: number; expenses: number }>();
+
+  const now = new Date();
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    buckets.set(key, { month: key, income: 0, expenses: 0 });
+  }
+
+  for (const transaction of transactions) {
+    const key = (transaction.date ?? "").slice(0, 7);
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    if (transaction.type === "income") bucket.income += transaction.amount;
+    else bucket.expenses += transaction.amount;
+  }
+  return [...buckets.values()];
+}
+
+export async function totalsByType(): Promise<{ income: number; expenses: number }> {
+  const transactions = await fetchAll<Txn>("transactions");
+  return transactions.reduce(
+    (totals, t) => {
+      if (t.type === "income") totals.income += t.amount;
+      else totals.expenses += t.amount;
+      return totals;
+    },
+    { income: 0, expenses: 0 }
   );
 }
 
-export function monthlyTotals(months: number): {
-  month: string;
-  income: number;
-  expenses: number;
-}[] {
-  return all<{ month: string; income: number; expenses: number }>(
-    `SELECT strftime('%Y-%m', date) AS month,
-            SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) AS income,
-            SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) AS expenses
-     FROM transactions
-     WHERE date(date) >= date('now', 'start of month', '-' || ? || ' months')
-     GROUP BY month ORDER BY month`,
-    months - 1
-  );
-}
-
-export function totalsByType(): { income: number; expenses: number } {
-  const row = one<{ income: number | null; expenses: number | null }>(
-    `SELECT SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) AS income,
-            SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) AS expenses
-     FROM transactions`
-  );
-  return { income: row?.income ?? 0, expenses: row?.expenses ?? 0 };
-}
-
-export function expensesByCategory(): { category: string; total: number }[] {
-  return all<{ category: string; total: number }>(
-    `SELECT category, SUM(amount) AS total FROM transactions
-     WHERE type = 'expense' GROUP BY category ORDER BY total DESC`
-  );
+export async function expensesByCategory(): Promise<{ category: string; total: number }[]> {
+  const transactions = await fetchAll<Txn>("transactions");
+  const totals = new Map<string, number>();
+  for (const t of transactions) {
+    if (t.type !== "expense") continue;
+    totals.set(t.category, (totals.get(t.category) ?? 0) + t.amount);
+  }
+  return [...totals.entries()]
+    .map(([category, total]) => ({ category, total }))
+    .sort((a, b) => b.total - a.total);
 }
 
 // ---------- Documents ----------
 
-export function listDocuments(): Doc[] {
-  return all<Doc>(
-    `SELECT d.*, pr.name AS property_name
-     FROM documents d LEFT JOIN properties pr ON pr.id = d.property_id
-     ORDER BY d.created_at DESC`
-  );
+export async function listDocuments(): Promise<Doc[]> {
+  const [documents, properties] = await Promise.all([
+    fetchAll<Doc>("documents"),
+    fetchAll<Property>("properties"),
+  ]);
+  const propertyMap = byId(properties);
+  return documents.map((d) => ({
+    ...d,
+    property_name: d.property ? propertyMap.get(d.property)?.name : undefined,
+  }));
 }
 
 // ---------- Condition reports ----------
 
-export function listConditionReports(): ConditionReport[] {
-  return all<ConditionReport>(
-    `SELECT c.*, pr.name AS property_name
-     FROM condition_reports c JOIN properties pr ON pr.id = c.property_id
-     ORDER BY c.created_at DESC`
-  );
+async function decorateReports(reports: ConditionReport[]): Promise<ConditionReport[]> {
+  const properties = await fetchAll<Property>("properties");
+  const propertyMap = byId(properties);
+  return reports.map((report) => ({
+    ...report,
+    items: Array.isArray(report.items) ? report.items : [],
+    property_name: propertyMap.get(report.property)?.name,
+  }));
 }
 
-export function getConditionReport(id: number): ConditionReport | undefined {
-  return one<ConditionReport>(
-    `SELECT c.*, pr.name AS property_name
-     FROM condition_reports c JOIN properties pr ON pr.id = c.property_id
-     WHERE c.id = ?`,
-    id
-  );
+export async function listConditionReports(): Promise<ConditionReport[]> {
+  return decorateReports(await fetchAll<ConditionReport>("condition_reports"));
+}
+
+export async function getConditionReport(id: Id): Promise<ConditionReport | undefined> {
+  const report = await fetchOne<ConditionReport>("condition_reports", id);
+  if (!report) return undefined;
+  return (await decorateReports([report]))[0];
+}
+
+// ---------- Bank accounts & imports ----------
+
+export async function listBankAccounts(): Promise<BankAccount[]> {
+  const [accounts, properties] = await Promise.all([
+    fetchAll<BankAccount>("bank_accounts", { sort: "created" }),
+    fetchAll<Property>("properties"),
+  ]);
+  const propertyMap = byId(properties);
+  return accounts.map((a) => ({
+    ...a,
+    property_name: a.property ? propertyMap.get(a.property)?.name : undefined,
+  }));
+}
+
+export async function listBankImports(status?: string): Promise<BankImport[]> {
+  const [imports, accounts, people] = await Promise.all([
+    fetchAll<BankImport>("bank_imports", { sort: "-posted_date" }),
+    fetchAll<BankAccount>("bank_accounts"),
+    fetchAll<Person>("people"),
+  ]);
+  const accountMap = byId(accounts);
+  const peopleMap = byId(people);
+  const decorated = imports.map((deposit) => ({
+    ...deposit,
+    account_name: deposit.account ? accountMap.get(deposit.account)?.name : undefined,
+    matched_tenant: deposit.person ? fullName(peopleMap.get(deposit.person)) : undefined,
+  }));
+  return status ? decorated.filter((d) => d.status === status) : decorated;
 }
 
 // ---------- Dashboard ----------
 
-export function dashboardStats() {
-  const props = listProperties();
-  const occupied = props.filter((p) => p.status === "occupied").length;
-  const stages = countPeopleByStage();
-  const activeLeases = all<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM leases WHERE status = 'active'"
-  )[0]?.n ?? 0;
+export async function dashboardStats() {
+  const [properties, stages, leases, collectedMonth, collectedYear, pastDue, openMaintenance] =
+    await Promise.all([
+      listProperties(),
+      countPeopleByStage(),
+      fetchAll<Lease>("leases"),
+      sumPaid("month"),
+      sumPaid("year"),
+      sumPastDue(),
+      countOpenMaintenance(),
+    ]);
+
+  const occupied = properties.filter((p) => p.status === "occupied").length;
   return {
-    properties: props.length,
+    properties: properties.length,
     occupied,
-    vacant: props.length - occupied,
-    occupancyRate: props.length ? Math.round((occupied / props.length) * 100) : 0,
-    tenants: stages.tenant,
-    leads: stages.lead,
-    applicants: stages.applicant,
-    activeLeases,
-    collectedThisMonth: sumPaid("start of month"),
-    collectedThisYear: sumPaid("start of year"),
-    pastDue: sumPastDue(),
-    openMaintenance: countOpenMaintenance(),
+    vacant: properties.length - occupied,
+    occupancyRate: properties.length ? Math.round((occupied / properties.length) * 100) : 0,
+    tenants: stages.tenant ?? 0,
+    leads: stages.lead ?? 0,
+    applicants: stages.applicant ?? 0,
+    activeLeases: leases.filter((l) => l.status === "active").length,
+    collectedThisMonth: collectedMonth,
+    collectedThisYear: collectedYear,
+    pastDue,
+    openMaintenance,
   };
 }
 
-export function isDatabaseEmpty(): boolean {
-  const row = one<{ n: number }>("SELECT COUNT(*) AS n FROM properties");
-  const people = one<{ n: number }>("SELECT COUNT(*) AS n FROM people");
-  return (row?.n ?? 0) === 0 && (people?.n ?? 0) === 0;
+export async function isDatabaseEmpty(): Promise<boolean> {
+  const [properties, people] = await Promise.all([
+    fetchAll<Property>("properties"),
+    fetchAll<Person>("people"),
+  ]);
+  return properties.length === 0 && people.length === 0;
+}
+
+// ---------- Settings ----------
+
+export async function getSetting(key: string, fallback = ""): Promise<string> {
+  const client = await pb();
+  try {
+    const record = await client
+      .collection("settings")
+      .getFirstListItem(`key="${key.replace(/"/g, '')}"`);
+    return (record as unknown as { value: string }).value || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  const client = await pb();
+  try {
+    const existing = await client
+      .collection("settings")
+      .getFirstListItem(`key="${key.replace(/"/g, '')}"`);
+    await client.collection("settings").update(existing.id, { value });
+  } catch {
+    await client.collection("settings").create({ key, value });
+  }
 }

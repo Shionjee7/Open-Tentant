@@ -17,9 +17,9 @@ function Chips({ items }: { items: string[] }) {
   );
 }
 
-export default function ListingsPage() {
-  const properties = listedProperties();
-  const rooms = listedRooms();
+export default async function ListingsPage() {
+  const properties = await listedProperties();
+  const rooms = await listedRooms();
   const total = properties.length + rooms.length;
 
   return (
@@ -98,7 +98,7 @@ export default function ListingsPage() {
                 </div>
                 {r.description && <p className="mt-2 line-clamp-2 text-sm text-ink-500">{r.description}</p>}
                 <Chips items={r.property_amenities ? r.property_amenities.split(",") : []} />
-                <Link href={`/apply/${r.property_id}?room=${r.id}`} className="btn mt-4 w-full justify-center">
+                <Link href={`/apply/${r.property}?room=${r.id}`} className="btn mt-4 w-full justify-center">
                   Apply for this room
                 </Link>
               </div>

@@ -13,8 +13,8 @@ const NEXT: Record<string, { status: string; label: string }[]> = {
   cancelled: [{ status: "new", label: "Reopen" }],
 };
 
-export default function MaintenancePage() {
-  const requests = listMaintenance();
+export default async function MaintenancePage() {
+  const requests = await listMaintenance();
   return (
     <>
       <PageHeader
@@ -40,7 +40,7 @@ export default function MaintenancePage() {
                 </div>
                 <div className="mt-1 text-sm text-ink-500">
                   {m.property_name}
-                  {m.tenant_name ? ` · reported by ${m.tenant_name}` : ""} · {shortDate(m.created_at)}
+                  {m.tenant_name ? ` · reported by ${m.tenant_name}` : ""} · {shortDate(m.created)}
                   {m.completed_at ? ` · completed ${shortDate(m.completed_at)}` : ""}
                 </div>
                 {m.description && <p className="mt-1 max-w-2xl text-sm text-ink-700">{m.description}</p>}

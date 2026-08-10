@@ -4,9 +4,9 @@ import { BackLink, PageHeader } from "@/components/ui";
 
 export const metadata = { title: "New maintenance request" };
 
-export default function NewMaintenancePage() {
-  const properties = listProperties();
-  const tenants = listPeople("tenant");
+export default async function NewMaintenancePage() {
+  const properties = await listProperties();
+  const tenants = await listPeople("tenant");
   return (
     <>
       <BackLink href="/maintenance" label="Maintenance" />

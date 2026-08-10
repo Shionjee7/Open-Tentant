@@ -4,6 +4,11 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # Your database lives here. Back up this folder and you've backed up everything.
+      # PocketBase's database lives here. Back up this folder and you've backed
+      # up everything.
       - ./data:/app/data
+    environment:
+      # Set these before exposing the app to the internet.
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - PB_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD:-opentenant-local-dev}
     restart: unless-stopped

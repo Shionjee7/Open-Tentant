@@ -5,7 +5,7 @@ import {
   maintenanceForPerson,
   paymentsForPerson,
 } from "@/lib/data";
-import { getSetting } from "@/lib/db";
+import { getSetting } from "@/lib/data";
 import { portalCreateMaintenance, portalReportPayment } from "@/lib/actions";
 import { money, moneyExact, shortDate, titleCase } from "@/lib/format";
 import { Badge } from "@/components/ui";
@@ -18,17 +18,17 @@ export default async function PortalPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const person = getPersonByToken(token);
+  const person = await getPersonByToken(token);
   if (!person) notFound();
 
-  const lease = activeLeaseForPerson(person.id);
-  const payments = paymentsForPerson(person.id);
+  const lease = await activeLeaseForPerson(person.id);
+  const payments = await paymentsForPerson(person.id);
   const openPayments = payments.filter((p) => p.status === "unpaid");
   const reportedCount = payments.filter((p) => p.status === "reported").length;
   const history = payments.filter((p) => p.status === "paid").slice(0, 12);
-  const maintenance = maintenanceForPerson(person.id);
-  const instructions = getSetting("payment_instructions");
-  const methods = getSetting("payment_methods");
+  const maintenance = await maintenanceForPerson(person.id);
+  const instructions = await getSetting("payment_instructions");
+  const methods = await getSetting("payment_methods");
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -139,7 +139,7 @@ export default async function PortalPage({
                   <li key={m.id} className="flex items-center justify-between px-4 py-3 text-sm">
                     <div>
                       <div className="font-medium">{m.title}</div>
-                      <div className="text-xs text-ink-500">{shortDate(m.created_at)}</div>
+                      <div className="text-xs text-ink-500">{shortDate(m.created)}</div>
                     </div>
                     <Badge value={m.status} />
                   </li>

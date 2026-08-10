@@ -27,9 +27,9 @@ export default async function ContactsPage({
 }) {
   const { stage: rawStage } = await searchParams;
   const stage = STAGES.some((s) => s.key === rawStage) ? rawStage! : "lead";
-  const people = listPeople(stage);
-  const counts = countPeopleByStage();
-  const properties = listProperties();
+  const people = await listPeople(stage);
+  const counts = await countPeopleByStage();
+  const properties = await listProperties();
 
   return (
     <>
@@ -92,7 +92,7 @@ export default async function ContactsPage({
                           {p.property_name ?? "—"}
                           {p.unit_name && <div className="text-xs text-ink-500">{p.unit_name}</div>}
                         </td>
-                        <td className="td">{shortDate(p.created_at)}</td>
+                        <td className="td">{shortDate(p.created)}</td>
                         <td className="td text-right">
                           <div className="flex items-center justify-end gap-2">
                             {p.stage === "tenant" && p.portal_token && (

@@ -1,9 +1,10 @@
 # Deploying OpenTenant
 
-OpenTenant is a normal Docker web app that stores everything in one SQLite file
-at `/app/data/opentenant.db`. Two rules make every deploy work:
+OpenTenant runs two processes: the web app, and PocketBase (its database). The included
+setup script starts both, so a container or host only needs to run one command. Everything
+persists under `$DATA_DIR/pb_data`. Two rules make every deploy work:
 
-1. **Mount a persistent volume at `/app/data`** — otherwise your properties,
+1. **Mount a persistent volume at your `DATA_DIR`** — otherwise your properties,
    tenants, and payments reset every time the service restarts.
 2. **Set `ADMIN_PASSWORD`** — without it the landlord dashboard is open to anyone
    who has the URL. (See [Security](#security) below.)
@@ -81,14 +82,28 @@ and treat them like passwords.
 
 ## Backups
 
-Everything is in one file. Copy it and you have a full backup:
+Everything lives under one folder. Copy it and you have a full backup:
 
 ```bash
 # Docker
-docker compose cp opentenant:/app/data/opentenant.db ./backup-$(date +%F).db
+docker compose cp opentenant:/app/data ./backup-$(date +%F)
 
 # Local
-cp data/opentenant.db ~/backups/opentenant-$(date +%F).db
+cp -r data/pb_data ~/backups/opentenant-$(date +%F)
 ```
 
-Restore by putting the file back at `data/opentenant.db` and restarting.
+Restore by putting the folder back and restarting. PocketBase's admin console
+(`http://127.0.0.1:8090/_/`) can also export and import collections, and supports
+scheduled backups to S3.
+
+## The database console
+
+PocketBase ships an admin UI at `/_/` on its own port (8090 by default). It is **not**
+exposed publicly by these deploys — it binds to localhost, so reach it with an SSH tunnel:
+
+```bash
+ssh -L 8090:127.0.0.1:8090 you@your-server
+```
+
+Sign in with `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`. Change that password from the default
+on any machine other people can reach.

@@ -14,16 +14,16 @@ export default async function ApplyPage({
 }) {
   const { propertyId } = await params;
   const { room } = await searchParams;
-  const property = getProperty(Number(propertyId));
+  const property = await getProperty(propertyId);
   if (!property) notFound();
-  const questions = listQuestions();
+  const questions = await listQuestions();
 
   const byRoom = property.rental_type === "by_room";
-  const requestedRoom = room ? getUnit(Number(room)) : undefined;
+  const requestedRoom = room ? await getUnit(room) : undefined;
   // Only honor a room that really belongs to this property.
-  const unit = requestedRoom?.property_id === property.id ? requestedRoom : undefined;
+  const unit = requestedRoom?.property === property.id ? requestedRoom : undefined;
   const availableRooms = byRoom
-    ? listUnits(property.id).filter((u) => u.status === "vacant" && u.listed)
+    ? (await listUnits(property.id)).filter((u) => u.status === "vacant" && u.listed)
     : [];
 
   const rent = unit ? unit.rent : property.rent;

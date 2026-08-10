@@ -194,7 +194,7 @@ export function parseStatement(text: string): ParsedRow[] {
 }
 
 /** Stable id for a row so importing the same statement twice doesn't duplicate. */
-export function fingerprint(accountId: number, row: ParsedRow): string {
+export function fingerprint(accountId: string, row: ParsedRow): string {
   const normalized = row.description.toLowerCase().replace(/\s+/g, " ").trim();
   return `${accountId}|${row.posted_date}|${row.amount.toFixed(2)}|${normalized}`;
 }

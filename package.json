@@ -9,6 +9,7 @@
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
+    "pb": "node scripts/pocketbase.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -16,6 +17,8 @@
   },
   "dependencies": {
     "next": "^15.4.6",
+    "pocketbase": "^0.27.1",
+    "pocketbase-server": "^0.39.5",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

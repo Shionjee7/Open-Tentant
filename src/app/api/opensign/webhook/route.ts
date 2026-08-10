@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb, getSetting } from "@/lib/db";
+import { getSetting } from "@/lib/data";
+import { pb } from "@/lib/pb";
 
 /**
  * Receives signing events from OpenSign so a signed lease updates itself.
@@ -12,7 +13,7 @@ import { getDb, getSetting } from "@/lib/db";
  */
 export async function POST(request: Request) {
   const expected =
-    process.env.OPENSIGN_WEBHOOK_SECRET?.trim() || getSetting("opensign_webhook_secret");
+    process.env.OPENSIGN_WEBHOOK_SECRET?.trim() || await getSetting("opensign_webhook_secret");
   if (!expected) {
     return NextResponse.json(
       { error: "Webhook not enabled. Set OPENSIGN_WEBHOOK_SECRET first." },
@@ -42,25 +43,32 @@ export async function POST(request: Request) {
     payload.isCompleted === true || event.includes("completed") || event.includes("signed");
   const isDeclined = payload.isDeclined === true || event.includes("declined");
 
-  const db = getDb();
-  const lease = db
-    .prepare("SELECT id FROM leases WHERE esign_document_id = ?")
-    .get(documentId) as { id: number } | undefined;
+  const client = await pb();
+  const lease = await client
+    .collection("leases")
+    .getFirstListItem(`esign_document_id="${documentId.replace(/"/g, "")}"`)
+    .catch(() => null);
   if (!lease) {
     // Not a document we know about — acknowledge so OpenSign stops retrying.
     return NextResponse.json({ ok: true, matched: false });
   }
 
+  const documents = await client
+    .collection("documents")
+    .getFullList({ perPage: 50, filter: `lease="${lease.id}" && provider="opensign"` });
+
   if (isSigned) {
-    db.prepare("UPDATE leases SET status = 'signed' WHERE id = ?").run(lease.id);
-    db.prepare(
-      `UPDATE documents SET status = 'signed', signed_at = datetime('now')
-       WHERE lease_id = ? AND provider = 'opensign'`
-    ).run(lease.id);
+    await client.collection("leases").update(lease.id, { status: "signed" });
+    for (const document of documents) {
+      await client.collection("documents").update(document.id, {
+        status: "signed",
+        signed_at: new Date().toISOString().slice(0, 10),
+      });
+    }
   } else if (isDeclined) {
-    db.prepare(
-      "UPDATE documents SET status = 'sent' WHERE lease_id = ? AND provider = 'opensign'"
-    ).run(lease.id);
+    for (const document of documents) {
+      await client.collection("documents").update(document.id, { status: "sent" });
+    }
   }
 
   return NextResponse.json({ ok: true, matched: true, leaseId: lease.id });

@@ -15,12 +15,15 @@ services:
     runtime: node
     plan: starter
     buildCommand: npm ci && npm run build
-    startCommand: npm start
+    # setup.mjs starts PocketBase, waits for it, then serves the app.
+    startCommand: node scripts/setup.mjs
     healthCheckPath: /listings
     envVars:
-      # node:sqlite (the database) requires Node 22.13 or newer.
       - key: NODE_VERSION
         value: "22"
+      # Change this from the default before anyone else can reach the machine.
+      - key: PB_ADMIN_PASSWORD
+        generateValue: true
       # Keep the database on the mounted disk below, not the ephemeral filesystem.
       - key: DATA_DIR
         value: /var/data

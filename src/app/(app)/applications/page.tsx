@@ -5,8 +5,8 @@ import { Badge, EmptyState, PageHeader, ProBadge } from "@/components/ui";
 
 export const metadata = { title: "Applications" };
 
-export default function ApplicationsPage() {
-  const apps = listApplications();
+export default async function ApplicationsPage() {
+  const apps = await listApplications();
   return (
     <>
       <PageHeader
@@ -63,7 +63,7 @@ export default function ApplicationsPage() {
                       )}
                     </td>
                     <td className="td"><Badge value={a.screening_status} /></td>
-                    <td className="td">{shortDate(a.created_at)}</td>
+                    <td className="td">{shortDate(a.created)}</td>
                     <td className="td"><Badge value={a.status} /></td>
                   </tr>
                 );

@@ -12,7 +12,8 @@ with all of it.
 | [React](https://github.com/facebook/react) | MIT | UI library |
 | [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | MIT | Styling |
 | [TypeScript](https://github.com/microsoft/TypeScript) | Apache-2.0 | Build-time only |
-| SQLite (via Node's built-in `node:sqlite`) | Public domain | Storage engine |
+| [PocketBase](https://github.com/pocketbase/pocketbase) | MIT | Database, REST API, admin console |
+| SQLite (inside PocketBase) | Public domain | Storage engine |
 
 All permissive. None of them require OpenTenant to adopt their license, and MIT is
 compatible with each.

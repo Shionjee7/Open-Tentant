@@ -14,12 +14,12 @@ export default function LeasePropertyPicker({
   properties: Property[];
   units: Unit[];
 }) {
-  const [propertyId, setPropertyId] = useState(properties[0]?.id ?? 0);
-  const [unitId, setUnitId] = useState(0);
+  const [propertyId, setPropertyId] = useState(properties[0]?.id ?? "");
+  const [unitId, setUnitId] = useState("");
 
   const property = properties.find((p) => p.id === propertyId);
   const byRoom = property?.rental_type === "by_room";
-  const rooms = units.filter((u) => u.property_id === propertyId);
+  const rooms = units.filter((u) => u.property === propertyId);
   const room = rooms.find((u) => u.id === unitId);
 
   const rent = byRoom ? (room?.rent ?? 0) : (property?.rent ?? 0);
@@ -35,8 +35,8 @@ export default function LeasePropertyPicker({
           className="input"
           value={propertyId}
           onChange={(e) => {
-            setPropertyId(Number(e.target.value));
-            setUnitId(0);
+            setPropertyId(e.target.value);
+            setUnitId("");
           }}
         >
           {properties.map((p) => (
@@ -55,9 +55,9 @@ export default function LeasePropertyPicker({
             required
             className="input"
             value={unitId}
-            onChange={(e) => setUnitId(Number(e.target.value))}
+            onChange={(e) => setUnitId(e.target.value)}
           >
-            <option value={0} disabled>Choose a room…</option>
+            <option value="" disabled>Choose a room…</option>
             {rooms.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name} — ${u.rent}/mo {u.status === "occupied" ? "(occupied)" : ""}

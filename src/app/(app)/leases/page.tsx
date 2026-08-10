@@ -5,8 +5,8 @@ import { Badge, EmptyState, PageHeader } from "@/components/ui";
 
 export const metadata = { title: "Leases" };
 
-export default function LeasesPage() {
-  const leases = listLeases();
+export default async function LeasesPage() {
+  const leases = await listLeases();
   return (
     <>
       <PageHeader

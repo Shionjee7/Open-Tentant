@@ -1,13 +1,13 @@
 import { listQuestions } from "@/lib/data";
-import { getSetting } from "@/lib/db";
+import { getSetting } from "@/lib/data";
 import { archiveQuestion, createQuestion, saveSettings } from "@/lib/actions";
 import { PageHeader, ProBadge } from "@/components/ui";
 import { titleCase } from "@/lib/format";
 
 export const metadata = { title: "Settings" };
 
-export default function SettingsPage() {
-  const questions = listQuestions();
+export default async function SettingsPage() {
+  const questions = await listQuestions();
   return (
     <>
       <PageHeader title="Settings" subtitle="Your business details, payment setup, e-sign, and application questions." />
@@ -17,13 +17,13 @@ export default function SettingsPage() {
           <h2 className="font-semibold">Business & payments</h2>
           <div>
             <label className="label">Business name (shown on public pages)</label>
-            <input name="business_name" defaultValue={getSetting("business_name")} className="input" placeholder="Sunrise Property Management" />
+            <input name="business_name" defaultValue={await getSetting("business_name")} className="input" placeholder="Sunrise Property Management" />
           </div>
           <div>
             <label className="label">Accepted payment methods</label>
             <input
               name="payment_methods"
-              defaultValue={getSetting("payment_methods")}
+              defaultValue={await getSetting("payment_methods")}
               className="input"
               placeholder="Zelle, Venmo, ACH, credit card, cash, check"
             />
@@ -34,7 +34,7 @@ export default function SettingsPage() {
             <textarea
               name="payment_instructions"
               rows={4}
-              defaultValue={getSetting("payment_instructions")}
+              defaultValue={await getSetting("payment_instructions")}
               className="input"
               placeholder={"Zelle: you@example.com (memo: your unit)\nStripe payment link: https://buy.stripe.com/…\nChecks payable to …"}
             />
@@ -49,7 +49,7 @@ export default function SettingsPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="label">Default provider</label>
-              <select name="esign_provider" defaultValue={getSetting("esign_provider", "opensign")} className="input">
+              <select name="esign_provider" defaultValue={await getSetting("esign_provider", "opensign")} className="input">
                 <option value="opensign">OpenSign (open source)</option>
                 <option value="documenso">Documenso (open source)</option>
                 <option value="docuseal">DocuSeal (open source)</option>
@@ -61,7 +61,7 @@ export default function SettingsPage() {
               <input
                 name="esign_base_url"
                 type="url"
-                defaultValue={getSetting("esign_base_url")}
+                defaultValue={await getSetting("esign_base_url")}
                 className="input"
                 placeholder="https://sign.yourdomain.com"
               />
@@ -84,24 +84,24 @@ export default function SettingsPage() {
                 <input
                   name="opensign_api_url"
                   type="url"
-                  defaultValue={getSetting("opensign_api_url")}
+                  defaultValue={await getSetting("opensign_api_url")}
                   className="input"
                   placeholder="https://app.opensignlabs.com/api/v1.2"
                 />
               </div>
               <div>
                 <label className="label">
-                  API token {getSetting("opensign_api_token") && <span className="text-emerald-600">· saved</span>}
+                  API token {await getSetting("opensign_api_token") && <span className="text-emerald-600">· saved</span>}
                 </label>
                 <input
                   name="opensign_api_token"
                   type="password"
                   className="input"
-                  placeholder={getSetting("opensign_api_token") ? "•••••• (leave blank to keep)" : "x-api-token value"}
+                  placeholder={await getSetting("opensign_api_token") ? "•••••• (leave blank to keep)" : "x-api-token value"}
                   autoComplete="off"
                 />
               </div>
-              {getSetting("opensign_api_token") && (
+              {await getSetting("opensign_api_token") && (
                 <label className="flex items-center gap-2 text-xs">
                   <input type="checkbox" name="clear_token" className="h-4 w-4 rounded border-slate-300" />
                   Remove the saved token

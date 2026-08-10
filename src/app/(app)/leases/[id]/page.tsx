@@ -26,14 +26,12 @@ export default async function LeaseDetailPage({
 }) {
   const { id } = await params;
   const { esign } = await searchParams;
-  const lease = getLease(Number(id));
+  const lease = await getLease(id);
   if (!lease) notFound();
 
-  const payments = listPayments().filter((p) => p.lease_id === lease.id);
+  const payments = (await listPayments()).filter((p) => p.lease === lease.id);
   const transitions = TRANSITIONS[lease.status] ?? [];
-  const tenants = leaseTenantIds(lease.id)
-    .map((personId) => getPerson(personId))
-    .filter((p): p is Person => Boolean(p));
+  const tenants = (await Promise.all((await leaseTenantIds(lease.id)).map((personId) => getPerson(personId)))).filter((p): p is Person => Boolean(p));
 
   return (
     <>
@@ -77,7 +75,7 @@ export default async function LeaseDetailPage({
         </div>
         <div className="card px-4 py-3">
           <div className="text-xs font-semibold uppercase text-ink-500">Property</div>
-          <Link href={`/properties/${lease.property_id}`} className="text-xl font-bold text-brand-600 hover:underline">
+          <Link href={`/properties/${lease.property}`} className="text-xl font-bold text-brand-600 hover:underline">
             View →
           </Link>
         </div>

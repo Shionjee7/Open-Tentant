@@ -2,436 +2,452 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getDb, setSetting } from "./db";
-import { getLease, getPerson, leaseTenantIds, listQuestions } from "./data";
+import { pb } from "./pb";
+import {
+  getLease,
+  getPerson,
+  leaseTenantIds,
+  listQuestions,
+  setSetting,
+} from "./data";
 import { seedDemoData } from "./seed";
 import { fingerprint, parseStatement } from "./statements";
 import { createSignatureRequest, fetchDocumentStatus, hasApiAccess } from "./opensign";
+import type { Id } from "./types";
 
 function s(form: FormData, key: string): string {
   return String(form.get(key) ?? "").trim();
 }
 
 function n(form: FormData, key: string): number {
-  const v = Number(form.get(key));
-  return Number.isFinite(v) ? v : 0;
+  const value = Number(form.get(key));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function flag(form: FormData, key: string): boolean {
+  return form.get(key) !== null;
+}
+
+/** PocketBase stores an empty relation as "", never null. */
+function rel(form: FormData, key: string): string {
+  return s(form, key);
 }
 
 function refresh() {
   revalidatePath("/", "layout");
 }
 
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 // ---------- Demo data ----------
 
 export async function loadDemoData() {
-  seedDemoData();
+  await seedDemoData();
   refresh();
 }
 
 // ---------- Properties ----------
 
 export async function createProperty(form: FormData) {
-  const db = getDb();
-  const result = db
-    .prepare(
-      `INSERT INTO properties (name, address, city, state, zip, type, beds, baths, sqft, rent, deposit, description, amenities, listed, priority_listing, rental_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      s(form, "name"),
-      s(form, "address"),
-      s(form, "city"),
-      s(form, "state"),
-      s(form, "zip"),
-      s(form, "type"),
-      n(form, "beds"),
-      n(form, "baths"),
-      n(form, "sqft"),
-      n(form, "rent"),
-      n(form, "deposit"),
-      s(form, "description"),
-      s(form, "amenities"),
-      form.get("listed") ? 1 : 0,
-      form.get("priority_listing") ? 1 : 0,
-      s(form, "rental_type") === "by_room" ? "by_room" : "whole"
-    );
-  const propertyId = Number(result.lastInsertRowid);
+  const client = await pb();
+  const byRoom = s(form, "rental_type") === "by_room";
 
-  // Renting by the room? Create the rooms right away so the property is usable.
-  if (s(form, "rental_type") === "by_room") {
+  const property = await client.collection("properties").create({
+    name: s(form, "name"),
+    address: s(form, "address"),
+    city: s(form, "city"),
+    state: s(form, "state"),
+    zip: s(form, "zip"),
+    type: s(form, "type"),
+    beds: n(form, "beds"),
+    baths: n(form, "baths"),
+    sqft: n(form, "sqft"),
+    rent: n(form, "rent"),
+    deposit: n(form, "deposit"),
+    status: "vacant",
+    listed: flag(form, "listed"),
+    priority_listing: flag(form, "priority_listing"),
+    description: s(form, "description"),
+    amenities: s(form, "amenities"),
+    rental_type: byRoom ? "by_room" : "whole",
+  });
+
+  if (byRoom) {
     const rooms = Math.max(0, Math.min(20, n(form, "room_count")));
     const roomRent = n(form, "room_rent");
-    const insert = db.prepare(
-      "INSERT INTO units (property_id, name, rent, deposit, listed) VALUES (?, ?, ?, ?, 1)"
-    );
     for (let i = 0; i < rooms; i++) {
-      insert.run(propertyId, `Room ${i + 1}`, roomRent, roomRent);
+      await client.collection("units").create({
+        property: property.id,
+        name: `Room ${i + 1}`,
+        rent: roomRent,
+        deposit: roomRent,
+        status: "vacant",
+        listed: true,
+      });
     }
   }
 
   refresh();
-  redirect(`/properties/${propertyId}`);
+  redirect(`/properties/${property.id}`);
 }
 
 export async function updateProperty(form: FormData) {
-  const id = n(form, "id");
-  getDb()
-    .prepare(
-      `UPDATE properties SET name=?, address=?, city=?, state=?, zip=?, type=?, beds=?, baths=?, sqft=?, rent=?, deposit=?, description=?, amenities=?, listed=?, priority_listing=?, status=?, rental_type=?
-       WHERE id=?`
-    )
-    .run(
-      s(form, "name"),
-      s(form, "address"),
-      s(form, "city"),
-      s(form, "state"),
-      s(form, "zip"),
-      s(form, "type"),
-      n(form, "beds"),
-      n(form, "baths"),
-      n(form, "sqft"),
-      n(form, "rent"),
-      n(form, "deposit"),
-      s(form, "description"),
-      s(form, "amenities"),
-      form.get("listed") ? 1 : 0,
-      form.get("priority_listing") ? 1 : 0,
-      s(form, "status") || "vacant",
-      s(form, "rental_type") === "by_room" ? "by_room" : "whole",
-      id
-    );
+  const client = await pb();
+  const id = s(form, "id");
+  await client.collection("properties").update(id, {
+    name: s(form, "name"),
+    address: s(form, "address"),
+    city: s(form, "city"),
+    state: s(form, "state"),
+    zip: s(form, "zip"),
+    type: s(form, "type"),
+    beds: n(form, "beds"),
+    baths: n(form, "baths"),
+    sqft: n(form, "sqft"),
+    rent: n(form, "rent"),
+    deposit: n(form, "deposit"),
+    status: s(form, "status") || "vacant",
+    listed: flag(form, "listed"),
+    priority_listing: flag(form, "priority_listing"),
+    description: s(form, "description"),
+    amenities: s(form, "amenities"),
+    rental_type: s(form, "rental_type") === "by_room" ? "by_room" : "whole",
+  });
   refresh();
   redirect(`/properties/${id}`);
 }
 
 // ---------- Rooms (units) ----------
 
+/**
+ * A by-the-room property counts as occupied when any room is taken, and vacant
+ * once every room is empty.
+ */
+async function syncPropertyOccupancy(propertyId: Id) {
+  if (!propertyId) return;
+  const client = await pb();
+  const property = await client.collection("properties").getOne(propertyId).catch(() => null);
+  if (!property || property.rental_type !== "by_room") return;
+
+  const rooms = await client
+    .collection("units")
+    .getFullList({ perPage: 200, filter: `property="${propertyId}"` });
+  const anyOccupied = rooms.some((room) => room.status === "occupied");
+  await client
+    .collection("properties")
+    .update(propertyId, { status: anyOccupied ? "occupied" : "vacant" });
+}
+
 export async function createUnit(form: FormData) {
-  const propertyId = n(form, "property_id");
-  getDb()
-    .prepare(
-      `INSERT INTO units (property_id, name, rent, deposit, size_sqft, private_bath, furnished, listed, description)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      propertyId,
-      s(form, "name") || "Room",
-      n(form, "rent"),
-      n(form, "deposit"),
-      n(form, "size_sqft"),
-      form.get("private_bath") ? 1 : 0,
-      form.get("furnished") ? 1 : 0,
-      form.get("listed") ? 1 : 0,
-      s(form, "description")
-    );
-  syncPropertyOccupancy(propertyId);
+  const client = await pb();
+  const propertyId = s(form, "property_id");
+  await client.collection("units").create({
+    property: propertyId,
+    name: s(form, "name") || "Room",
+    rent: n(form, "rent"),
+    deposit: n(form, "deposit"),
+    status: "vacant",
+    size_sqft: n(form, "size_sqft"),
+    private_bath: flag(form, "private_bath"),
+    furnished: flag(form, "furnished"),
+    listed: flag(form, "listed"),
+    description: s(form, "description"),
+  });
+  await syncPropertyOccupancy(propertyId);
   refresh();
   redirect(`/properties/${propertyId}`);
 }
 
 /** Adds several rooms at once — "this house has 4 bedrooms" in one step. */
 export async function addRooms(form: FormData) {
-  const propertyId = n(form, "property_id");
+  const client = await pb();
+  const propertyId = s(form, "property_id");
   const count = Math.max(1, Math.min(20, n(form, "count")));
-  const rent = n(form, "rent");
-  const deposit = n(form, "deposit");
-  const db = getDb();
-  const existing = db
-    .prepare("SELECT COUNT(*) AS n FROM units WHERE property_id = ?")
-    .get(propertyId) as { n: number };
-  const insert = db.prepare(
-    "INSERT INTO units (property_id, name, rent, deposit, listed) VALUES (?, ?, ?, ?, 1)"
-  );
+  const existing = await client
+    .collection("units")
+    .getFullList({ perPage: 200, filter: `property="${propertyId}"` });
+
   for (let i = 0; i < count; i++) {
-    insert.run(propertyId, `Room ${existing.n + i + 1}`, rent, deposit);
+    await client.collection("units").create({
+      property: propertyId,
+      name: `Room ${existing.length + i + 1}`,
+      rent: n(form, "rent"),
+      deposit: n(form, "deposit"),
+      status: "vacant",
+      listed: true,
+    });
   }
-  syncPropertyOccupancy(propertyId);
+  await syncPropertyOccupancy(propertyId);
   refresh();
   redirect(`/properties/${propertyId}`);
 }
 
 export async function updateUnit(form: FormData) {
-  const propertyId = n(form, "property_id");
-  getDb()
-    .prepare(
-      `UPDATE units SET name=?, rent=?, deposit=?, size_sqft=?, private_bath=?, furnished=?, listed=?, description=?, status=?
-       WHERE id=?`
-    )
-    .run(
-      s(form, "name"),
-      n(form, "rent"),
-      n(form, "deposit"),
-      n(form, "size_sqft"),
-      form.get("private_bath") ? 1 : 0,
-      form.get("furnished") ? 1 : 0,
-      form.get("listed") ? 1 : 0,
-      s(form, "description"),
-      s(form, "status") || "vacant",
-      n(form, "id")
-    );
-  syncPropertyOccupancy(propertyId);
+  const client = await pb();
+  const propertyId = s(form, "property_id");
+  await client.collection("units").update(s(form, "id"), {
+    name: s(form, "name"),
+    rent: n(form, "rent"),
+    deposit: n(form, "deposit"),
+    size_sqft: n(form, "size_sqft"),
+    private_bath: flag(form, "private_bath"),
+    furnished: flag(form, "furnished"),
+    listed: flag(form, "listed"),
+    description: s(form, "description"),
+    status: s(form, "status") || "vacant",
+  });
+  await syncPropertyOccupancy(propertyId);
   refresh();
   redirect(`/properties/${propertyId}`);
 }
 
 export async function deleteUnit(form: FormData) {
-  const db = getDb();
-  const id = n(form, "id");
-  const propertyId = n(form, "property_id");
-  // Don't orphan people or leases pointing at this room.
-  db.prepare("UPDATE people SET unit_id = NULL WHERE unit_id = ?").run(id);
-  db.prepare("UPDATE leases SET unit_id = NULL WHERE unit_id = ?").run(id);
-  db.prepare("DELETE FROM units WHERE id = ?").run(id);
-  syncPropertyOccupancy(propertyId);
+  const client = await pb();
+  const id = s(form, "id");
+  const propertyId = s(form, "property_id");
+
+  // Don't leave people or leases pointing at a room that no longer exists.
+  const residents = await client
+    .collection("people")
+    .getFullList({ perPage: 200, filter: `unit="${id}"` });
+  for (const person of residents) {
+    await client.collection("people").update(person.id, { unit: "" });
+  }
+  const leases = await client
+    .collection("leases")
+    .getFullList({ perPage: 200, filter: `unit="${id}"` });
+  for (const lease of leases) {
+    await client.collection("leases").update(lease.id, { unit: "" });
+  }
+
+  await client.collection("units").delete(id);
+  await syncPropertyOccupancy(propertyId);
   refresh();
   redirect(`/properties/${propertyId}`);
 }
 
 /** Assigns (or clears) the tenant living in a room. */
 export async function assignRoomTenant(form: FormData) {
-  const db = getDb();
-  const unitId = n(form, "unit_id");
-  const propertyId = n(form, "property_id");
-  const personId = n(form, "person_id");
+  const client = await pb();
+  const unitId = s(form, "unit_id");
+  const propertyId = s(form, "property_id");
+  const personId = s(form, "person_id");
 
-  db.prepare("UPDATE people SET unit_id = NULL WHERE unit_id = ?").run(unitId);
-  if (personId) {
-    db.prepare(
-      "UPDATE people SET unit_id = ?, property_id = ?, stage = 'tenant' WHERE id = ?"
-    ).run(unitId, propertyId, personId);
-    db.prepare("UPDATE units SET status = 'occupied' WHERE id = ?").run(unitId);
-  } else {
-    db.prepare("UPDATE units SET status = 'vacant' WHERE id = ?").run(unitId);
+  const current = await client
+    .collection("people")
+    .getFullList({ perPage: 200, filter: `unit="${unitId}"` });
+  for (const person of current) {
+    await client.collection("people").update(person.id, { unit: "" });
   }
-  syncPropertyOccupancy(propertyId);
+
+  if (personId) {
+    await client.collection("people").update(personId, {
+      unit: unitId,
+      property: propertyId,
+      stage: "tenant",
+    });
+    await client.collection("units").update(unitId, { status: "occupied" });
+  } else {
+    await client.collection("units").update(unitId, { status: "vacant" });
+  }
+
+  await syncPropertyOccupancy(propertyId);
   refresh();
   redirect(`/properties/${propertyId}`);
 }
 
-/**
- * For a by-the-room property, the property counts as occupied when any room is
- * taken, and vacant when every room is empty.
- */
-function syncPropertyOccupancy(propertyId: number) {
-  if (!propertyId) return;
-  const db = getDb();
-  const property = db
-    .prepare("SELECT rental_type FROM properties WHERE id = ?")
-    .get(propertyId) as { rental_type: string } | undefined;
-  if (property?.rental_type !== "by_room") return;
-  const occupied = db
-    .prepare("SELECT COUNT(*) AS n FROM units WHERE property_id = ? AND status = 'occupied'")
-    .get(propertyId) as { n: number };
-  db.prepare("UPDATE properties SET status = ? WHERE id = ?").run(
-    occupied.n > 0 ? "occupied" : "vacant",
-    propertyId
-  );
-}
-
 export async function toggleListing(form: FormData) {
-  const id = n(form, "id");
+  const client = await pb();
+  const id = s(form, "id");
   const field = s(form, "field") === "priority_listing" ? "priority_listing" : "listed";
-  getDb()
-    .prepare(`UPDATE properties SET ${field} = 1 - ${field} WHERE id = ?`)
-    .run(id);
+  const property = await client.collection("properties").getOne(id);
+  await client.collection("properties").update(id, { [field]: !property[field] });
   refresh();
 }
 
 // ---------- People ----------
 
 export async function createPerson(form: FormData) {
-  getDb()
-    .prepare(
-      `INSERT INTO people (first_name, last_name, email, phone, stage, property_id, notes, portal_token)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      s(form, "first_name"),
-      s(form, "last_name"),
-      s(form, "email"),
-      s(form, "phone"),
-      s(form, "stage") || "lead",
-      n(form, "property_id") || null,
-      s(form, "notes"),
-      crypto.randomUUID()
-    );
+  const client = await pb();
+  const stage = s(form, "stage") || "lead";
+  await client.collection("people").create({
+    first_name: s(form, "first_name"),
+    last_name: s(form, "last_name"),
+    email: s(form, "email"),
+    phone: s(form, "phone"),
+    stage,
+    property: rel(form, "property_id"),
+    notes: s(form, "notes"),
+    portal_token: crypto.randomUUID(),
+  });
   refresh();
-  redirect(`/contacts?stage=${s(form, "stage") || "lead"}`);
+  redirect(`/contacts?stage=${stage}`);
 }
 
 export async function setPersonStage(form: FormData) {
-  getDb()
-    .prepare("UPDATE people SET stage = ? WHERE id = ?")
-    .run(s(form, "stage"), n(form, "id"));
+  const client = await pb();
+  await client.collection("people").update(s(form, "id"), { stage: s(form, "stage") });
   refresh();
 }
 
 // ---------- Custom questions ----------
 
 export async function createQuestion(form: FormData) {
-  getDb()
-    .prepare("INSERT INTO custom_questions (question, type, required) VALUES (?, ?, ?)")
-    .run(s(form, "question"), s(form, "type") || "text", form.get("required") ? 1 : 0);
+  const client = await pb();
+  await client.collection("custom_questions").create({
+    question: s(form, "question"),
+    type: s(form, "type") || "text",
+    required: flag(form, "required"),
+    archived: false,
+  });
   refresh();
 }
 
 export async function archiveQuestion(form: FormData) {
-  getDb()
-    .prepare("UPDATE custom_questions SET archived = 1 WHERE id = ?")
-    .run(n(form, "id"));
+  const client = await pb();
+  await client.collection("custom_questions").update(s(form, "id"), { archived: true });
   refresh();
 }
 
 // ---------- Applications ----------
 
 export async function submitApplication(form: FormData) {
-  const db = getDb();
-  const unitId = n(form, "unit_id") || null;
-  const person = db
-    .prepare(
-      `INSERT INTO people (first_name, last_name, email, phone, stage, property_id, unit_id, portal_token)
-       VALUES (?, ?, ?, ?, 'applicant', ?, ?, ?)`
-    )
-    .run(
-      s(form, "first_name"),
-      s(form, "last_name"),
-      s(form, "email"),
-      s(form, "phone"),
-      n(form, "property_id") || null,
-      unitId,
-      crypto.randomUUID()
-    );
-  const answers = listQuestions().map((q) => ({
-    question: q.question,
-    answer: s(form, `q_${q.id}`),
+  const client = await pb();
+  const unitId = rel(form, "unit_id");
+  const propertyId = rel(form, "property_id");
+
+  const person = await client.collection("people").create({
+    first_name: s(form, "first_name"),
+    last_name: s(form, "last_name"),
+    email: s(form, "email"),
+    phone: s(form, "phone"),
+    stage: "applicant",
+    property: propertyId,
+    unit: unitId,
+    portal_token: crypto.randomUUID(),
+  });
+
+  const questions = await listQuestions();
+  const answers = questions.map((question) => ({
+    question: question.question,
+    answer: s(form, `q_${question.id}`),
   }));
-  db.prepare(
-    `INSERT INTO applications (person_id, property_id, unit_id, monthly_income, employer, move_in_date, answers)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    Number(person.lastInsertRowid),
-    n(form, "property_id") || null,
-    unitId,
-    n(form, "monthly_income"),
-    s(form, "employer"),
-    s(form, "move_in_date"),
-    JSON.stringify(answers)
-  );
+
+  await client.collection("applications").create({
+    person: person.id,
+    property: propertyId,
+    unit: unitId,
+    status: "pending",
+    monthly_income: n(form, "monthly_income"),
+    employer: s(form, "employer"),
+    income_verified: false,
+    screening_status: "not_requested",
+    answers,
+    move_in_date: s(form, "move_in_date"),
+  });
+
   refresh();
   redirect("/apply/thanks");
 }
 
 export async function setApplicationStatus(form: FormData) {
-  const db = getDb();
-  const id = n(form, "id");
+  const client = await pb();
+  const id = s(form, "id");
   const status = s(form, "status");
-  db.prepare("UPDATE applications SET status = ? WHERE id = ?").run(status, id);
+  await client.collection("applications").update(id, { status });
+
   if (status === "approved") {
-    const app = db
-      .prepare("SELECT person_id, property_id, unit_id FROM applications WHERE id = ?")
-      .get(id) as { person_id: number; property_id: number | null; unit_id: number | null } | undefined;
-    if (app) {
-      db.prepare(
-        "UPDATE people SET stage = 'tenant', property_id = ?, unit_id = ? WHERE id = ?"
-      ).run(app.property_id, app.unit_id, app.person_id);
-      // Approving for a specific room fills that room.
-      if (app.unit_id) {
-        db.prepare("UPDATE units SET status = 'occupied' WHERE id = ?").run(app.unit_id);
-        if (app.property_id) syncPropertyOccupancy(app.property_id);
-      }
+    const application = await client.collection("applications").getOne(id);
+    await client.collection("people").update(application.person, {
+      stage: "tenant",
+      property: application.property || "",
+      unit: application.unit || "",
+    });
+    if (application.unit) {
+      await client.collection("units").update(application.unit, { status: "occupied" });
+      await syncPropertyOccupancy(application.property);
     }
   }
   refresh();
 }
 
 export async function setScreening(form: FormData) {
-  getDb()
-    .prepare(
-      "UPDATE applications SET screening_status = ?, screening_notes = ?, screening_link = ? WHERE id = ?"
-    )
-    .run(
-      s(form, "screening_status"),
-      s(form, "screening_notes"),
-      s(form, "screening_link"),
-      n(form, "id")
-    );
+  const client = await pb();
+  await client.collection("applications").update(s(form, "id"), {
+    screening_status: s(form, "screening_status"),
+    screening_notes: s(form, "screening_notes"),
+    screening_link: s(form, "screening_link"),
+  });
   refresh();
 }
 
 export async function toggleIncomeVerified(form: FormData) {
-  getDb()
-    .prepare("UPDATE applications SET income_verified = 1 - income_verified WHERE id = ?")
-    .run(n(form, "id"));
+  const client = await pb();
+  const id = s(form, "id");
+  const application = await client.collection("applications").getOne(id);
+  await client
+    .collection("applications")
+    .update(id, { income_verified: !application.income_verified });
   refresh();
 }
 
 // ---------- Leases ----------
 
 export async function createLease(form: FormData) {
-  const db = getDb();
-  const result = db
-    .prepare(
-      `INSERT INTO leases (property_id, unit_id, start_date, end_date, rent, deposit, status, esign_provider, esign_url, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      n(form, "property_id"),
-      n(form, "unit_id") || null,
-      s(form, "start_date"),
-      s(form, "end_date"),
-      n(form, "rent"),
-      n(form, "deposit"),
-      s(form, "status") || "draft",
-      s(form, "esign_provider"),
-      s(form, "esign_url"),
-      s(form, "notes")
-    );
-  const leaseId = Number(result.lastInsertRowid);
-  for (const key of form.getAll("tenant_ids")) {
-    const pid = Number(key);
-    if (pid) {
-      db.prepare("INSERT OR IGNORE INTO lease_tenants (lease_id, person_id) VALUES (?, ?)").run(
-        leaseId,
-        pid
-      );
-    }
-  }
+  const client = await pb();
+  const lease = await client.collection("leases").create({
+    property: rel(form, "property_id"),
+    unit: rel(form, "unit_id"),
+    tenants: form.getAll("tenant_ids").map(String).filter(Boolean),
+    start_date: s(form, "start_date"),
+    end_date: s(form, "end_date"),
+    rent: n(form, "rent"),
+    deposit: n(form, "deposit"),
+    status: s(form, "status") || "draft",
+    esign_provider: s(form, "esign_provider"),
+    esign_url: s(form, "esign_url"),
+    notes: s(form, "notes"),
+  });
   refresh();
-  redirect(`/leases/${leaseId}`);
+  redirect(`/leases/${lease.id}`);
 }
 
 export async function setLeaseStatus(form: FormData) {
-  const db = getDb();
-  const id = n(form, "id");
+  const client = await pb();
+  const id = s(form, "id");
   const status = s(form, "status");
-  db.prepare("UPDATE leases SET status = ? WHERE id = ?").run(status, id);
-  const lease = db.prepare("SELECT property_id, unit_id FROM leases WHERE id = ?").get(id) as
-    | { property_id: number; unit_id: number | null }
-    | undefined;
-  if (lease) {
-    if (status === "active") {
-      db.prepare(
-        `UPDATE people SET stage = 'tenant', property_id = ?, unit_id = ?
-         WHERE id IN (SELECT person_id FROM lease_tenants WHERE lease_id = ?)`
-      ).run(lease.property_id, lease.unit_id, id);
-      if (lease.unit_id) {
-        db.prepare("UPDATE units SET status = 'occupied' WHERE id = ?").run(lease.unit_id);
-        syncPropertyOccupancy(lease.property_id);
-      } else {
-        db.prepare("UPDATE properties SET status = 'occupied' WHERE id = ?").run(lease.property_id);
-      }
+  await client.collection("leases").update(id, { status });
+
+  const lease = await client.collection("leases").getOne(id);
+  const tenantIds: string[] = Array.isArray(lease.tenants) ? lease.tenants : [];
+
+  if (status === "active") {
+    for (const tenantId of tenantIds) {
+      await client.collection("people").update(tenantId, {
+        stage: "tenant",
+        property: lease.property,
+        unit: lease.unit || "",
+      });
     }
-    if (status === "ended") {
-      db.prepare(
-        `UPDATE people SET stage = 'past', unit_id = NULL
-         WHERE id IN (SELECT person_id FROM lease_tenants WHERE lease_id = ?)`
-      ).run(id);
-      if (lease.unit_id) {
-        db.prepare("UPDATE units SET status = 'vacant' WHERE id = ?").run(lease.unit_id);
-        syncPropertyOccupancy(lease.property_id);
-      } else {
-        db.prepare("UPDATE properties SET status = 'vacant' WHERE id = ?").run(lease.property_id);
-      }
+    if (lease.unit) {
+      await client.collection("units").update(lease.unit, { status: "occupied" });
+      await syncPropertyOccupancy(lease.property);
+    } else {
+      await client.collection("properties").update(lease.property, { status: "occupied" });
+    }
+  }
+
+  if (status === "ended") {
+    for (const tenantId of tenantIds) {
+      await client.collection("people").update(tenantId, { stage: "past", unit: "" });
+    }
+    if (lease.unit) {
+      await client.collection("units").update(lease.unit, { status: "vacant" });
+      await syncPropertyOccupancy(lease.property);
+    } else {
+      await client.collection("properties").update(lease.property, { status: "vacant" });
     }
   }
   refresh();
@@ -439,43 +455,30 @@ export async function setLeaseStatus(form: FormData) {
 
 // ---------- E-signature (OpenSign) ----------
 
-/**
- * Sends the lease for signature.
- *
- * With an API token configured this creates the document in OpenSign and
- * stores the signing link. Without one — the free self-hosted case — it records
- * that the lease was sent and points the landlord at their OpenSign instance to
- * upload the generated lease and send it there.
- */
 export async function sendLeaseForSignature(form: FormData) {
-  const db = getDb();
-  const leaseId = n(form, "lease_id");
-  const lease = getLease(leaseId);
+  const client = await pb();
+  const leaseId = s(form, "lease_id");
+  const lease = await getLease(leaseId);
   if (!lease) return;
 
-  const tenants = leaseTenantIds(leaseId)
-    .map((id) => getPerson(id))
-    .filter((p): p is NonNullable<typeof p> => Boolean(p));
-
+  const tenantIds = await leaseTenantIds(leaseId);
+  const tenants = (await Promise.all(tenantIds.map((id) => getPerson(id)))).filter(
+    (p): p is NonNullable<typeof p> => Boolean(p)
+  );
   const signers = tenants
     .filter((t) => t.email)
     .map((t) => ({ name: `${t.first_name} ${t.last_name}`.trim(), email: t.email }));
 
   const title = `Lease — ${lease.property_name}${lease.unit_name ? ` — ${lease.unit_name}` : ""}`;
 
-  if (hasApiAccess()) {
-    if (signers.length === 0) {
-      redirect(`/leases/${leaseId}?esign=nosigners`);
-    }
-    // The API wants the file itself; we send the generated lease as HTML, which
-    // OpenSign converts. Anything unusual comes back as an error we surface.
-    const origin = s(form, "origin");
+  if (await hasApiAccess()) {
+    if (signers.length === 0) redirect(`/leases/${leaseId}?esign=nosigners`);
+
+    const origin = s(form, "origin") || "http://localhost:3000";
     const documentHtml = await fetch(`${origin}/leases/${leaseId}/document`)
-      .then((r) => (r.ok ? r.text() : ""))
+      .then((response) => (response.ok ? response.text() : ""))
       .catch(() => "");
-    if (!documentHtml) {
-      redirect(`/leases/${leaseId}?esign=nodoc`);
-    }
+    if (!documentHtml) redirect(`/leases/${leaseId}?esign=nodoc`);
 
     const result = await createSignatureRequest({
       title,
@@ -485,87 +488,101 @@ export async function sendLeaseForSignature(form: FormData) {
     });
 
     if (!result.ok) {
-      db.prepare("UPDATE leases SET notes = ? WHERE id = ?").run(
-        `${lease.notes}\n[e-sign] ${result.error}`.trim().slice(0, 1000),
-        leaseId
-      );
+      await client.collection("leases").update(leaseId, {
+        notes: `${lease.notes}\n[e-sign] ${result.error}`.trim().slice(0, 1000),
+      });
       redirect(`/leases/${leaseId}?esign=failed`);
     }
 
-    db.prepare(
-      "UPDATE leases SET status = 'sent', esign_provider = 'opensign', esign_url = ?, esign_document_id = ? WHERE id = ?"
-    ).run(result.signingUrl, result.documentId, leaseId);
-    db.prepare(
-      `INSERT INTO documents (name, type, lease_id, property_id, status, provider, external_url)
-       VALUES (?, 'lease', ?, ?, 'sent', 'opensign', ?)`
-    ).run(title, leaseId, lease.property_id, result.signingUrl);
+    await client.collection("leases").update(leaseId, {
+      status: "sent",
+      esign_provider: "opensign",
+      esign_url: result.signingUrl,
+      esign_document_id: result.documentId,
+    });
+    await client.collection("documents").create({
+      name: title,
+      type: "lease",
+      lease: leaseId,
+      property: lease.property,
+      status: "sent",
+      provider: "opensign",
+      external_url: result.signingUrl,
+    });
     refresh();
     redirect(`/leases/${leaseId}?esign=sent`);
   }
 
   // Guided (free) mode.
-  db.prepare(
-    "UPDATE leases SET status = 'sent', esign_provider = 'opensign' WHERE id = ?"
-  ).run(leaseId);
-  db.prepare(
-    `INSERT INTO documents (name, type, lease_id, property_id, status, provider)
-     VALUES (?, 'lease', ?, ?, 'sent', 'opensign')`
-  ).run(title, leaseId, lease.property_id);
+  await client
+    .collection("leases")
+    .update(leaseId, { status: "sent", esign_provider: "opensign" });
+  await client.collection("documents").create({
+    name: title,
+    type: "lease",
+    lease: leaseId,
+    property: lease.property,
+    status: "sent",
+    provider: "opensign",
+  });
   refresh();
   redirect(`/leases/${leaseId}?esign=guided`);
 }
 
-/** Stores the signing link copied out of OpenSign in guided mode. */
 export async function saveSigningLink(form: FormData) {
-  const leaseId = n(form, "lease_id");
-  getDb()
-    .prepare("UPDATE leases SET esign_url = ?, esign_provider = 'opensign' WHERE id = ?")
-    .run(s(form, "esign_url"), leaseId);
-  getDb()
-    .prepare(
-      "UPDATE documents SET external_url = ? WHERE lease_id = ? AND provider = 'opensign' AND external_url = ''"
-    )
-    .run(s(form, "esign_url"), leaseId);
+  const client = await pb();
+  const leaseId = s(form, "lease_id");
+  const url = s(form, "esign_url");
+  await client
+    .collection("leases")
+    .update(leaseId, { esign_url: url, esign_provider: "opensign" });
+
+  const documents = await client
+    .collection("documents")
+    .getFullList({ perPage: 50, filter: `lease="${leaseId}" && provider="opensign"` });
+  for (const document of documents.filter((d) => !d.external_url)) {
+    await client.collection("documents").update(document.id, { external_url: url });
+  }
   refresh();
   redirect(`/leases/${leaseId}`);
 }
 
-/** Asks OpenSign whether the lease has been signed yet (API mode only). */
 export async function refreshSigningStatus(form: FormData) {
-  const leaseId = n(form, "lease_id");
-  const db = getDb();
-  const lease = db
-    .prepare("SELECT esign_document_id FROM leases WHERE id = ?")
-    .get(leaseId) as { esign_document_id: string | null } | undefined;
-  if (!lease?.esign_document_id) {
-    redirect(`/leases/${leaseId}?esign=nostatus`);
-  }
+  const client = await pb();
+  const leaseId = s(form, "lease_id");
+  const lease = await client.collection("leases").getOne(leaseId);
+  if (!lease.esign_document_id) redirect(`/leases/${leaseId}?esign=nostatus`);
 
   const status = await fetchDocumentStatus(lease.esign_document_id);
-  if (!status) {
-    redirect(`/leases/${leaseId}?esign=nostatus`);
-  }
+  if (!status) redirect(`/leases/${leaseId}?esign=nostatus`);
 
   if (status.status === "signed") {
-    db.prepare("UPDATE leases SET status = 'signed' WHERE id = ?").run(leaseId);
-    db.prepare(
-      `UPDATE documents SET status = 'signed', signed_at = ?
-       WHERE lease_id = ? AND provider = 'opensign'`
-    ).run(status.signedAt ?? new Date().toISOString().slice(0, 10), leaseId);
+    await client.collection("leases").update(leaseId, { status: "signed" });
+    const documents = await client
+      .collection("documents")
+      .getFullList({ perPage: 50, filter: `lease="${leaseId}" && provider="opensign"` });
+    for (const document of documents) {
+      await client
+        .collection("documents")
+        .update(document.id, { status: "signed", signed_at: status.signedAt ?? todayIso() });
+    }
   }
   refresh();
   redirect(`/leases/${leaseId}?esign=${status.status}`);
 }
 
-/** Marks a lease signed by hand — the free path, once everyone has signed. */
 export async function markLeaseSigned(form: FormData) {
-  const db = getDb();
-  const leaseId = n(form, "lease_id");
-  db.prepare("UPDATE leases SET status = 'signed' WHERE id = ?").run(leaseId);
-  db.prepare(
-    `UPDATE documents SET status = 'signed', signed_at = datetime('now')
-     WHERE lease_id = ? AND status <> 'signed'`
-  ).run(leaseId);
+  const client = await pb();
+  const leaseId = s(form, "lease_id");
+  await client.collection("leases").update(leaseId, { status: "signed" });
+  const documents = await client
+    .collection("documents")
+    .getFullList({ perPage: 50, filter: `lease="${leaseId}"` });
+  for (const document of documents.filter((d) => d.status !== "signed")) {
+    await client
+      .collection("documents")
+      .update(document.id, { status: "signed", signed_at: todayIso() });
+  }
   refresh();
   redirect(`/leases/${leaseId}`);
 }
@@ -573,330 +590,302 @@ export async function markLeaseSigned(form: FormData) {
 // ---------- Payments ----------
 
 export async function createPayment(form: FormData) {
-  const db = getDb();
+  const client = await pb();
   const months = Math.max(1, Math.min(24, n(form, "repeat_months") || 1));
-  const due = s(form, "due_date");
+  const firstDue = s(form, "due_date");
+
   for (let i = 0; i < months; i++) {
-    const dueDate = new Date(due + "T00:00:00");
-    dueDate.setMonth(dueDate.getMonth() + i);
-    db.prepare(
-      `INSERT INTO payments (lease_id, person_id, amount, type, due_date, notes)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(
-      n(form, "lease_id") || null,
-      n(form, "person_id") || null,
-      n(form, "amount"),
-      s(form, "type") || "rent",
-      dueDate.toISOString().slice(0, 10),
-      s(form, "notes")
-    );
+    const due = new Date(`${firstDue}T00:00:00`);
+    due.setMonth(due.getMonth() + i);
+    await client.collection("payments").create({
+      lease: rel(form, "lease_id"),
+      person: rel(form, "person_id"),
+      amount: n(form, "amount"),
+      type: s(form, "type") || "rent",
+      due_date: due.toISOString().slice(0, 10),
+      status: "unpaid",
+      notes: s(form, "notes"),
+    });
   }
   refresh();
   redirect("/payments");
 }
 
-export async function markPaymentPaid(form: FormData) {
-  const db = getDb();
-  const id = n(form, "id");
-  const method = s(form, "method") || "other";
-  const today = new Date().toISOString().slice(0, 10);
-  db.prepare("UPDATE payments SET status = 'paid', paid_date = ?, method = ? WHERE id = ?").run(
-    today,
-    method,
-    id
-  );
-  const pay = db
-    .prepare(
-      `SELECT pay.amount, pay.type, l.property_id
-       FROM payments pay LEFT JOIN leases l ON l.id = pay.lease_id
-       WHERE pay.id = ?`
-    )
-    .get(id) as { amount: number; type: string; property_id: number | null } | undefined;
-  if (pay) {
-    db.prepare(
-      `INSERT INTO transactions (property_id, date, type, category, amount, description, payment_id)
-       VALUES (?, ?, 'income', ?, ?, ?, ?)`
-    ).run(
-      pay.property_id,
-      today,
-      pay.type === "rent" ? "rent" : pay.type,
-      pay.amount,
-      `Payment received (${method})`,
-      id
-    );
+/** Books an income transaction for a payment that has been received. */
+async function bookPaymentIncome(paymentId: Id, paidDate: string, method: string, note: string) {
+  const client = await pb();
+  const payment = await client.collection("payments").getOne(paymentId);
+  let propertyId = "";
+  if (payment.lease) {
+    const lease = await client.collection("leases").getOne(payment.lease).catch(() => null);
+    propertyId = lease?.property ?? "";
   }
+  await client.collection("transactions").create({
+    property: propertyId,
+    date: paidDate,
+    type: "income",
+    category: payment.type === "rent" ? "rent" : payment.type,
+    amount: payment.amount,
+    description: note,
+    payment: paymentId,
+  });
+}
+
+export async function markPaymentPaid(form: FormData) {
+  const client = await pb();
+  const id = s(form, "id");
+  const method = s(form, "method") || "other";
+  const paidDate = todayIso();
+  await client
+    .collection("payments")
+    .update(id, { status: "paid", paid_date: paidDate, method });
+  await bookPaymentIncome(id, paidDate, method, `Payment received (${method})`);
   refresh();
 }
 
 export async function deletePayment(form: FormData) {
-  getDb().prepare("DELETE FROM payments WHERE id = ? AND status = 'unpaid'").run(n(form, "id"));
+  const client = await pb();
+  const id = s(form, "id");
+  const payment = await client.collection("payments").getOne(id).catch(() => null);
+  if (payment?.status === "unpaid") {
+    await client.collection("payments").delete(id);
+  }
   refresh();
 }
 
 // ---------- Tenant portal (token-authenticated) ----------
 
-function personIdForToken(token: string): number | null {
+async function personForToken(token: string) {
   if (!token) return null;
-  const row = getDb()
-    .prepare("SELECT id FROM people WHERE portal_token = ?")
-    .get(token) as { id: number } | undefined;
-  return row?.id ?? null;
+  const client = await pb();
+  return client
+    .collection("people")
+    .getFirstListItem(`portal_token="${token.replace(/"/g, "")}"`)
+    .catch(() => null);
 }
 
 export async function portalReportPayment(form: FormData) {
   const token = s(form, "token");
-  const personId = personIdForToken(token);
-  if (!personId) return;
-  const paymentId = n(form, "payment_id");
-  // The payment must belong to this tenant directly or via one of their leases.
-  getDb()
-    .prepare(
-      `UPDATE payments
-       SET status = 'reported', reported_method = ?, reported_date = ?, reported_note = ?
-       WHERE id = ? AND status = 'unpaid'
-         AND (person_id = ? OR lease_id IN (SELECT lease_id FROM lease_tenants WHERE person_id = ?))`
-    )
-    .run(
-      s(form, "reported_method") || "other",
-      s(form, "reported_date") || new Date().toISOString().slice(0, 10),
-      s(form, "reported_note"),
-      paymentId,
-      personId,
-      personId
-    );
+  const person = await personForToken(token);
+  if (!person) return;
+
+  const client = await pb();
+  const paymentId = s(form, "payment_id");
+  const payment = await client.collection("payments").getOne(paymentId).catch(() => null);
+  if (!payment || payment.status !== "unpaid") return;
+
+  // The payment must belong to this tenant directly or through one of their leases.
+  let allowed = payment.person === person.id;
+  if (!allowed && payment.lease) {
+    const lease = await client.collection("leases").getOne(payment.lease).catch(() => null);
+    allowed = Array.isArray(lease?.tenants) && lease.tenants.includes(person.id);
+  }
+  if (!allowed) return;
+
+  await client.collection("payments").update(paymentId, {
+    status: "reported",
+    reported_method: s(form, "reported_method") || "other",
+    reported_date: s(form, "reported_date") || todayIso(),
+    reported_note: s(form, "reported_note"),
+  });
   refresh();
   redirect(`/portal/${token}`);
 }
 
 export async function portalCreateMaintenance(form: FormData) {
   const token = s(form, "token");
-  const person = getDb()
-    .prepare("SELECT id, property_id FROM people WHERE portal_token = ?")
-    .get(token) as { id: number; property_id: number | null } | undefined;
+  const person = await personForToken(token);
   if (!person) return;
-  const propertyId = person.property_id ?? n(form, "property_id");
+
+  const propertyId = person.property || s(form, "property_id");
   if (!propertyId) return;
-  getDb()
-    .prepare(
-      `INSERT INTO maintenance_requests (property_id, person_id, title, description, priority)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(propertyId, person.id, s(form, "title"), s(form, "description"), s(form, "priority") || "medium");
+
+  const client = await pb();
+  await client.collection("maintenance_requests").create({
+    property: propertyId,
+    unit: person.unit || "",
+    person: person.id,
+    title: s(form, "title"),
+    description: s(form, "description"),
+    priority: s(form, "priority") || "medium",
+    status: "new",
+  });
   refresh();
   redirect(`/portal/${token}`);
 }
 
 export async function approveReportedPayment(form: FormData) {
-  const db = getDb();
-  const id = n(form, "id");
-  const pay = db
-    .prepare(
-      `SELECT pay.amount, pay.type, pay.reported_method, pay.reported_date, l.property_id
-       FROM payments pay LEFT JOIN leases l ON l.id = pay.lease_id
-       WHERE pay.id = ? AND pay.status = 'reported'`
-    )
-    .get(id) as
-    | { amount: number; type: string; reported_method: string; reported_date: string; property_id: number | null }
-    | undefined;
-  if (!pay) return;
-  const paidDate = pay.reported_date || new Date().toISOString().slice(0, 10);
-  db.prepare("UPDATE payments SET status = 'paid', paid_date = ?, method = ? WHERE id = ?").run(
-    paidDate,
-    pay.reported_method || "other",
-    id
-  );
-  db.prepare(
-    `INSERT INTO transactions (property_id, date, type, category, amount, description, payment_id)
-     VALUES (?, ?, 'income', ?, ?, ?, ?)`
-  ).run(
-    pay.property_id,
-    paidDate,
-    pay.type === "rent" ? "rent" : pay.type,
-    pay.amount,
-    `Tenant-reported payment approved (${pay.reported_method || "other"})`,
-    id
-  );
+  const client = await pb();
+  const id = s(form, "id");
+  const payment = await client.collection("payments").getOne(id).catch(() => null);
+  if (!payment || payment.status !== "reported") return;
+
+  const paidDate = payment.reported_date || todayIso();
+  const method = payment.reported_method || "other";
+  await client.collection("payments").update(id, { status: "paid", paid_date: paidDate, method });
+  await bookPaymentIncome(id, paidDate, method, `Tenant-reported payment approved (${method})`);
   refresh();
 }
 
 export async function rejectReportedPayment(form: FormData) {
-  getDb()
-    .prepare(
-      `UPDATE payments
-       SET status = 'unpaid', reported_method = '', reported_date = '', reported_note = ''
-       WHERE id = ? AND status = 'reported'`
-    )
-    .run(n(form, "id"));
+  const client = await pb();
+  const id = s(form, "id");
+  const payment = await client.collection("payments").getOne(id).catch(() => null);
+  if (!payment || payment.status !== "reported") return;
+  await client.collection("payments").update(id, {
+    status: "unpaid",
+    reported_method: "",
+    reported_date: "",
+    reported_note: "",
+  });
   refresh();
 }
 
 // ---------- Bank accounts & statement import ----------
 
 export async function createBankAccount(form: FormData) {
-  getDb()
-    .prepare(
-      `INSERT INTO bank_accounts (name, institution, last4, kind, property_id, notes)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      s(form, "name"),
-      s(form, "institution"),
-      s(form, "last4").replace(/\D/g, "").slice(-4),
-      s(form, "kind") || "bank",
-      n(form, "property_id") || null,
-      s(form, "notes")
-    );
+  const client = await pb();
+  await client.collection("bank_accounts").create({
+    name: s(form, "name"),
+    institution: s(form, "institution"),
+    last4: s(form, "last4").replace(/\D/g, "").slice(-4),
+    kind: s(form, "kind") || "bank",
+    property: rel(form, "property_id"),
+    notes: s(form, "notes"),
+  });
   refresh();
   redirect("/banking");
 }
 
 export async function deleteBankAccount(form: FormData) {
-  const db = getDb();
-  const id = n(form, "id");
-  db.prepare("UPDATE bank_imports SET account_id = NULL WHERE account_id = ?").run(id);
-  db.prepare("DELETE FROM bank_accounts WHERE id = ?").run(id);
+  const client = await pb();
+  const id = s(form, "id");
+  const imports = await client
+    .collection("bank_imports")
+    .getFullList({ perPage: 500, filter: `account="${id}"` });
+  for (const deposit of imports) {
+    await client.collection("bank_imports").update(deposit.id, { account: "" });
+  }
+  await client.collection("bank_accounts").delete(id);
   refresh();
 }
 
-/**
- * Reads a pasted or uploaded statement and stores the deposits for review.
- * Rows already imported are skipped, so re-importing a file is harmless.
- */
 export async function importStatement(form: FormData) {
-  const accountId = n(form, "account_id") || null;
+  const accountId = rel(form, "account_id");
   const source = s(form, "source") || "bank";
-  const depositsOnly = form.get("deposits_only") !== null;
+  const depositsOnly = flag(form, "deposits_only");
 
   let text = s(form, "statement_text");
   const file = form.get("statement_file");
   if (file instanceof File && file.size > 0) {
     text = `${await file.text()}\n${text}`;
   }
-  if (!text.trim()) {
-    redirect("/banking?error=empty");
-  }
+  if (!text.trim()) redirect("/banking?error=empty");
 
   const rows = parseStatement(text);
-  if (rows.length === 0) {
-    redirect("/banking?error=unparsed");
-  }
+  if (rows.length === 0) redirect("/banking?error=unparsed");
 
-  const db = getDb();
-  const insert = db.prepare(
-    `INSERT OR IGNORE INTO bank_imports (account_id, posted_date, description, amount, source, fingerprint)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  );
+  const client = await pb();
+  const existing = await client.collection("bank_imports").getFullList({ perPage: 1000 });
+  const seen = new Set(existing.map((deposit) => deposit.fingerprint).filter(Boolean));
+
   let imported = 0;
   let skipped = 0;
   for (const row of rows) {
-    // Money going out isn't rent coming in.
     if (depositsOnly && row.amount <= 0) {
       skipped++;
       continue;
     }
-    const result = insert.run(
-      accountId,
-      row.posted_date,
-      row.description,
-      row.amount,
+    const print = fingerprint(accountId || "none", row);
+    if (seen.has(print)) {
+      skipped++;
+      continue;
+    }
+    await client.collection("bank_imports").create({
+      account: accountId,
+      posted_date: row.posted_date,
+      description: row.description,
+      amount: row.amount,
       source,
-      fingerprint(accountId ?? 0, row)
-    );
-    if (result.changes > 0) imported++;
-    else skipped++;
+      status: "unmatched",
+      fingerprint: print,
+    });
+    seen.add(print);
+    imported++;
   }
 
   refresh();
   redirect(`/banking?imported=${imported}&skipped=${skipped}`);
 }
 
-/** Links a deposit to a scheduled payment: marks it paid and books the income. */
 export async function matchImport(form: FormData) {
-  const db = getDb();
-  const importId = n(form, "id");
-  const paymentId = n(form, "payment_id");
+  const client = await pb();
+  const importId = s(form, "id");
+  const paymentId = s(form, "payment_id");
   if (!paymentId) return;
 
-  const deposit = db
-    .prepare("SELECT posted_date, amount, source, description FROM bank_imports WHERE id = ?")
-    .get(importId) as
-    | { posted_date: string; amount: number; source: string; description: string }
-    | undefined;
-  if (!deposit) return;
+  const deposit = await client.collection("bank_imports").getOne(importId).catch(() => null);
+  const payment = await client.collection("payments").getOne(paymentId).catch(() => null);
+  if (!deposit || !payment) return;
 
-  const payment = db
-    .prepare(
-      `SELECT pay.id, pay.amount, pay.type, pay.person_id, l.property_id
-       FROM payments pay LEFT JOIN leases l ON l.id = pay.lease_id
-       WHERE pay.id = ?`
-    )
-    .get(paymentId) as
-    | { id: number; amount: number; type: string; person_id: number | null; property_id: number | null }
-    | undefined;
-  if (!payment) return;
-
-  db.prepare("UPDATE payments SET status = 'paid', paid_date = ?, method = ? WHERE id = ?").run(
+  await client.collection("payments").update(paymentId, {
+    status: "paid",
+    paid_date: deposit.posted_date,
+    method: deposit.source,
+  });
+  await bookPaymentIncome(
+    paymentId,
     deposit.posted_date,
     deposit.source,
-    paymentId
+    `Bank deposit matched — ${deposit.description}`.slice(0, 200)
   );
-  db.prepare(
-    `INSERT INTO transactions (property_id, date, type, category, amount, description, payment_id)
-     VALUES (?, ?, 'income', ?, ?, ?, ?)`
-  ).run(
-    payment.property_id,
-    deposit.posted_date,
-    payment.type === "rent" ? "rent" : payment.type,
-    deposit.amount,
-    `Bank deposit matched — ${deposit.description}`.slice(0, 200),
-    paymentId
-  );
-  db.prepare(
-    "UPDATE bank_imports SET status = 'matched', payment_id = ?, person_id = ? WHERE id = ?"
-  ).run(paymentId, payment.person_id, importId);
-
+  await client.collection("bank_imports").update(importId, {
+    status: "matched",
+    payment: paymentId,
+    person: payment.person || "",
+  });
   refresh();
 }
 
-/** Records a deposit as income without tying it to a scheduled payment. */
 export async function bookImportAsIncome(form: FormData) {
-  const db = getDb();
-  const importId = n(form, "id");
-  const deposit = db
-    .prepare("SELECT posted_date, amount, description FROM bank_imports WHERE id = ?")
-    .get(importId) as { posted_date: string; amount: number; description: string } | undefined;
+  const client = await pb();
+  const importId = s(form, "id");
+  const deposit = await client.collection("bank_imports").getOne(importId).catch(() => null);
   if (!deposit) return;
 
-  db.prepare(
-    `INSERT INTO transactions (property_id, date, type, category, amount, description)
-     VALUES (?, ?, 'income', ?, ?, ?)`
-  ).run(
-    n(form, "property_id") || null,
-    deposit.posted_date,
-    s(form, "category") || "other",
-    deposit.amount,
-    `Bank deposit — ${deposit.description}`.slice(0, 200)
-  );
-  db.prepare("UPDATE bank_imports SET status = 'matched' WHERE id = ?").run(importId);
+  await client.collection("transactions").create({
+    property: rel(form, "property_id"),
+    date: deposit.posted_date,
+    type: "income",
+    category: s(form, "category") || "other",
+    amount: deposit.amount,
+    description: `Bank deposit — ${deposit.description}`.slice(0, 200),
+  });
+  await client.collection("bank_imports").update(importId, { status: "matched" });
   refresh();
 }
 
 export async function ignoreImport(form: FormData) {
-  getDb().prepare("UPDATE bank_imports SET status = 'ignored' WHERE id = ?").run(n(form, "id"));
+  const client = await pb();
+  await client.collection("bank_imports").update(s(form, "id"), { status: "ignored" });
   refresh();
 }
 
 export async function unignoreImport(form: FormData) {
-  getDb()
-    .prepare("UPDATE bank_imports SET status = 'unmatched' WHERE id = ?")
-    .run(n(form, "id"));
+  const client = await pb();
+  await client.collection("bank_imports").update(s(form, "id"), { status: "unmatched" });
   refresh();
 }
 
 export async function clearImports(form: FormData) {
   const status = s(form, "status");
-  if (status === "ignored" || status === "matched") {
-    getDb().prepare("DELETE FROM bank_imports WHERE status = ?").run(status);
+  if (status !== "ignored" && status !== "matched") return;
+  const client = await pb();
+  const deposits = await client
+    .collection("bank_imports")
+    .getFullList({ perPage: 1000, filter: `status="${status}"` });
+  for (const deposit of deposits) {
+    await client.collection("bank_imports").delete(deposit.id);
   }
   refresh();
 }
@@ -904,50 +893,41 @@ export async function clearImports(form: FormData) {
 // ---------- Maintenance ----------
 
 export async function createMaintenance(form: FormData) {
-  getDb()
-    .prepare(
-      `INSERT INTO maintenance_requests (property_id, person_id, title, description, priority)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(
-      n(form, "property_id"),
-      n(form, "person_id") || null,
-      s(form, "title"),
-      s(form, "description"),
-      s(form, "priority") || "medium"
-    );
+  const client = await pb();
+  await client.collection("maintenance_requests").create({
+    property: rel(form, "property_id"),
+    person: rel(form, "person_id"),
+    title: s(form, "title"),
+    description: s(form, "description"),
+    priority: s(form, "priority") || "medium",
+    status: "new",
+  });
   refresh();
   redirect("/maintenance");
 }
 
 export async function setMaintenanceStatus(form: FormData) {
+  const client = await pb();
   const status = s(form, "status");
-  getDb()
-    .prepare(
-      `UPDATE maintenance_requests
-       SET status = ?, completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE completed_at END
-       WHERE id = ?`
-    )
-    .run(status, status, n(form, "id"));
+  await client.collection("maintenance_requests").update(s(form, "id"), {
+    status,
+    ...(status === "completed" ? { completed_at: todayIso() } : {}),
+  });
   refresh();
 }
 
 // ---------- Transactions ----------
 
 export async function createTransaction(form: FormData) {
-  getDb()
-    .prepare(
-      `INSERT INTO transactions (property_id, date, type, category, amount, description)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      n(form, "property_id") || null,
-      s(form, "date"),
-      s(form, "type") || "expense",
-      s(form, "category") || "other",
-      n(form, "amount"),
-      s(form, "description")
-    );
+  const client = await pb();
+  await client.collection("transactions").create({
+    property: rel(form, "property_id"),
+    date: s(form, "date"),
+    type: s(form, "type") || "expense",
+    category: s(form, "category") || "other",
+    amount: n(form, "amount"),
+    description: s(form, "description"),
+  });
   refresh();
   redirect("/accounting");
 }
@@ -955,33 +935,27 @@ export async function createTransaction(form: FormData) {
 // ---------- Documents ----------
 
 export async function createDocument(form: FormData) {
-  getDb()
-    .prepare(
-      `INSERT INTO documents (name, type, lease_id, property_id, provider, external_url, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      s(form, "name"),
-      s(form, "type") || "lease",
-      n(form, "lease_id") || null,
-      n(form, "property_id") || null,
-      s(form, "provider") || "manual",
-      s(form, "external_url"),
-      s(form, "status") || "draft"
-    );
+  const client = await pb();
+  await client.collection("documents").create({
+    name: s(form, "name"),
+    type: s(form, "type") || "lease",
+    lease: rel(form, "lease_id"),
+    property: rel(form, "property_id"),
+    provider: s(form, "provider") || "manual",
+    external_url: s(form, "external_url"),
+    status: s(form, "status") || "draft",
+  });
   refresh();
   redirect("/documents");
 }
 
 export async function setDocumentStatus(form: FormData) {
+  const client = await pb();
   const status = s(form, "status");
-  getDb()
-    .prepare(
-      `UPDATE documents
-       SET status = ?, signed_at = CASE WHEN ? = 'signed' THEN datetime('now') ELSE signed_at END
-       WHERE id = ?`
-    )
-    .run(status, status, n(form, "id"));
+  await client.collection("documents").update(s(form, "id"), {
+    status,
+    ...(status === "signed" ? { signed_at: todayIso() } : {}),
+  });
   refresh();
 }
 
@@ -1003,25 +977,22 @@ const DEFAULT_AREAS = [
 ];
 
 export async function createConditionReport(form: FormData) {
-  const items = DEFAULT_AREAS.map((area) => ({ area, condition: "", notes: "" }));
-  const result = getDb()
-    .prepare(
-      `INSERT INTO condition_reports (property_id, lease_id, type, items, notes)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(
-      n(form, "property_id"),
-      n(form, "lease_id") || null,
-      s(form, "type") || "move_in",
-      JSON.stringify(items),
-      s(form, "notes")
-    );
+  const client = await pb();
+  const report = await client.collection("condition_reports").create({
+    property: rel(form, "property_id"),
+    lease: rel(form, "lease_id"),
+    type: s(form, "type") || "move_in",
+    status: "draft",
+    items: DEFAULT_AREAS.map((area) => ({ area, condition: "", notes: "" })),
+    notes: s(form, "notes"),
+  });
   refresh();
-  redirect(`/condition-reports/${result.lastInsertRowid}`);
+  redirect(`/condition-reports/${report.id}`);
 }
 
 export async function updateConditionReport(form: FormData) {
-  const id = n(form, "id");
+  const client = await pb();
+  const id = s(form, "id");
   const count = n(form, "item_count");
   const items = [];
   for (let i = 0; i < count; i++) {
@@ -1032,14 +1003,12 @@ export async function updateConditionReport(form: FormData) {
     });
   }
   const complete = s(form, "action") === "complete";
-  getDb()
-    .prepare(
-      `UPDATE condition_reports
-       SET items = ?, notes = ?, status = ?,
-           completed_at = CASE WHEN ? THEN datetime('now') ELSE completed_at END
-       WHERE id = ?`
-    )
-    .run(JSON.stringify(items), s(form, "report_notes"), complete ? "completed" : "draft", complete ? 1 : 0, id);
+  await client.collection("condition_reports").update(id, {
+    items,
+    notes: s(form, "report_notes"),
+    status: complete ? "completed" : "draft",
+    ...(complete ? { completed_at: todayIso() } : {}),
+  });
   refresh();
   redirect(`/condition-reports/${id}`);
 }
@@ -1047,17 +1016,18 @@ export async function updateConditionReport(form: FormData) {
 // ---------- Settings ----------
 
 export async function saveSettings(form: FormData) {
-  setSetting("business_name", s(form, "business_name"));
-  setSetting("payment_instructions", s(form, "payment_instructions"));
-  setSetting("payment_methods", s(form, "payment_methods"));
-  setSetting("esign_provider", s(form, "esign_provider"));
-  setSetting("esign_base_url", s(form, "esign_base_url"));
-  setSetting("opensign_api_url", s(form, "opensign_api_url"));
-  // Blank submission keeps the existing token rather than wiping it, since the
-  // field is rendered empty for safety.
+  await setSetting("business_name", s(form, "business_name"));
+  await setSetting("payment_instructions", s(form, "payment_instructions"));
+  await setSetting("payment_methods", s(form, "payment_methods"));
+  await setSetting("esign_provider", s(form, "esign_provider"));
+  await setSetting("esign_base_url", s(form, "esign_base_url"));
+  await setSetting("opensign_api_url", s(form, "opensign_api_url"));
+
+  // The token field renders empty for safety, so a blank submission keeps it.
   const token = s(form, "opensign_api_token");
-  if (token) setSetting("opensign_api_token", token);
-  if (form.get("clear_token")) setSetting("opensign_api_token", "");
+  if (token) await setSetting("opensign_api_token", token);
+  if (flag(form, "clear_token")) await setSetting("opensign_api_token", "");
+
   refresh();
   redirect("/settings");
 }

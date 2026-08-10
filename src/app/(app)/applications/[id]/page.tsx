@@ -12,10 +12,10 @@ export default async function ApplicationDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const app = getApplication(Number(id));
+  const app = await getApplication(id);
   if (!app) notFound();
 
-  const answers: { question: string; answer: string }[] = JSON.parse(app.answers || "[]");
+  const answers: { question: string; answer: string }[] = app.answers;
   const rent = app.unit_rent || app.property_rent;
   const ratio = rent ? app.monthly_income / rent : null;
 
@@ -24,7 +24,7 @@ export default async function ApplicationDetailPage({
       <BackLink href="/applications" label="Applications" />
       <PageHeader
         title={`Application — ${app.applicant_name}`}
-        subtitle={`${app.property_name ?? "No property"}${app.unit_name ? ` · ${app.unit_name}` : ""} · applied ${shortDate(app.created_at)}`}
+        subtitle={`${app.property_name ?? "No property"}${app.unit_name ? ` · ${app.unit_name}` : ""} · applied ${shortDate(app.created)}`}
         action={<Badge value={app.status} />}
       />
 

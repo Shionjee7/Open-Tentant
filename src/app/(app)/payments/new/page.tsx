@@ -1,14 +1,14 @@
 import { listLeases, listPeople } from "@/lib/data";
-import { getSetting } from "@/lib/db";
+import { getSetting } from "@/lib/data";
 import { createPayment } from "@/lib/actions";
 import { BackLink, PageHeader } from "@/components/ui";
 
 export const metadata = { title: "Record payment" };
 
-export default function NewPaymentPage() {
-  const leases = listLeases();
-  const tenants = listPeople("tenant");
-  const instructions = getSetting("payment_instructions");
+export default async function NewPaymentPage() {
+  const leases = await listLeases();
+  const tenants = await listPeople("tenant");
+  const instructions = await getSetting("payment_instructions");
 
   return (
     <>

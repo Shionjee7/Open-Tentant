@@ -27,7 +27,7 @@ const NOTICES: Record<string, { tone: "good" | "warn"; text: string }> = {
  * you the generated lease and a link into your instance. With an API token the
  * same button does it all without leaving the app.
  */
-export default function SigningPanel({
+export default async function SigningPanel({
   lease,
   tenants,
   notice,
@@ -36,8 +36,8 @@ export default function SigningPanel({
   tenants: Person[];
   notice?: string;
 }) {
-  const automatic = hasApiAccess();
-  const appUrl = openSignAppUrl();
+  const automatic = await hasApiAccess();
+  const appUrl = await openSignAppUrl();
   const missingEmails = tenants.filter((t) => !t.email);
   const message = notice ? NOTICES[notice] : undefined;
 

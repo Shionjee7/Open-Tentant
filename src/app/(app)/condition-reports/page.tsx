@@ -6,10 +6,10 @@ import { Badge, PageHeader } from "@/components/ui";
 
 export const metadata = { title: "Condition reports" };
 
-export default function ConditionReportsPage() {
-  const reports = listConditionReports();
-  const properties = listProperties();
-  const leases = listLeases();
+export default async function ConditionReportsPage() {
+  const reports = await listConditionReports();
+  const properties = await listProperties();
+  const leases = await listLeases();
 
   return (
     <>
@@ -35,7 +35,7 @@ export default function ConditionReportsPage() {
                     {r.property_name} — {titleCase(r.type)}
                   </div>
                   <div className="mt-0.5 text-sm text-ink-500">
-                    Created {shortDate(r.created_at)}
+                    Created {shortDate(r.created)}
                     {r.completed_at ? ` · completed ${shortDate(r.completed_at)}` : ""}
                   </div>
                 </div>

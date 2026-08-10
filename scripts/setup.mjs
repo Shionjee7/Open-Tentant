@@ -70,28 +70,48 @@ if (!fs.existsSync(buildId) || process.argv.includes("--rebuild")) {
   console.log(`${green("✓")} Build already present ${dim("(npm run setup --rebuild to force)")}`);
 }
 
-// --- 4. Where the data lives ----------------------------------------------
-const dataDir = process.env.DATA_DIR || path.join(root, "data");
-fs.mkdirSync(dataDir, { recursive: true });
-const dbPath = path.join(dataDir, "opentenant.db");
-const isNew = !fs.existsSync(dbPath);
+// --- 4. Database (PocketBase) ----------------------------------------------
+const { prepare, serve, waitUntilHealthy, paths, PB_PORT } = await import("./pocketbase.mjs");
+const { pbData } = paths();
+const isNew = !fs.existsSync(path.join(pbData, "data.db"));
 
-// --- 5. Start --------------------------------------------------------------
+step("Preparing the database…");
+prepare();
+const database = serve({ silent: true });
+if (!(await waitUntilHealthy())) {
+  console.error(`\n${red("PocketBase didn't start.")} Run ${bold("npm run pb")} to see why.`);
+  database.kill();
+  process.exit(1);
+}
+console.log(`${green("✓")} Database ready`);
+
+// --- 5. Start the app ------------------------------------------------------
 const port = process.env.PORT || "3000";
 const gated = Boolean(process.env.ADMIN_PASSWORD?.trim());
 
 console.log(`
-${green(bold("OpenTenant is starting."))}
+${green(bold("OpenTenant is running."))}
 
   Open        ${bold(`http://localhost:${port}`)}
-  Database    ${dbPath}${isNew ? dim("  (new — click “Load demo data” to explore)") : ""}
+  Data        ${pbData}${isNew ? dim("  (new — click “Load demo data” to explore)") : ""}
+  Admin UI    ${dim(`http://127.0.0.1:${PB_PORT}/_/  (database console)`)}
   Login gate  ${gated ? "on (ADMIN_PASSWORD is set)" : dim("off — set ADMIN_PASSWORD before putting this on the internet")}
 
   ${dim("Press Ctrl+C to stop.")}
 `);
 
 const server = spawn("npm", ["start"], { cwd: root, stdio: "inherit", env: process.env });
-server.on("exit", (code) => process.exit(code ?? 0));
+
+function shutdown(code) {
+  database.kill("SIGTERM");
+  server.kill("SIGTERM");
+  process.exit(code ?? 0);
+}
+server.on("exit", (code) => shutdown(code));
+database.on("exit", () => {
+  console.error(red("\nThe database stopped unexpectedly."));
+  shutdown(1);
+});
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => server.kill(signal));
+  process.on(signal, () => shutdown(0));
 }

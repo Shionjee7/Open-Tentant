@@ -1,5 +1,5 @@
 import { getLease, getProperty, getUnit, leaseTenantIds, getPerson } from "@/lib/data";
-import { getSetting } from "@/lib/db";
+import { getSetting } from "@/lib/data";
 import { buildLeaseDocument } from "@/lib/lease-document";
 import type { Person } from "@/lib/types";
 
@@ -12,28 +12,26 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const lease = getLease(Number(id));
+  const lease = await getLease(id);
   if (!lease) {
     return new Response("Lease not found", { status: 404 });
   }
 
-  const property = getProperty(lease.property_id);
+  const property = await getProperty(lease.property);
   if (!property) {
     return new Response("Property not found", { status: 404 });
   }
 
-  const unit = lease.unit_id ? getUnit(lease.unit_id) : undefined;
-  const tenants = leaseTenantIds(lease.id)
-    .map((personId) => getPerson(personId))
-    .filter((p): p is Person => Boolean(p));
+  const unit = lease.unit ? await getUnit(lease.unit) : undefined;
+  const tenants = (await Promise.all((await leaseTenantIds(lease.id)).map((personId) => getPerson(personId)))).filter((p): p is Person => Boolean(p));
 
   const html = buildLeaseDocument({
     lease,
     property,
     unit,
     tenants,
-    landlordName: getSetting("business_name", "Landlord"),
-    paymentInstructions: getSetting("payment_instructions"),
+    landlordName: await getSetting("business_name", "Landlord"),
+    paymentInstructions: await getSetting("payment_instructions"),
   });
 
   return new Response(html, {

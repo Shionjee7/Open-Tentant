@@ -18,18 +18,21 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
-
-# The SQLite database lives here — mount a persistent volume at /app/data so
+# PocketBase keeps its database here — mount a persistent volume at /app/data so
 # your properties, tenants, and payments survive restarts and redeploys.
 ENV DATA_DIR=/app/data
 RUN mkdir -p /app/data
 
 COPY --from=builder /app/package.json /app/package-lock.json ./
+# Includes the PocketBase binary, which ships as a platform-specific package.
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.mjs ./
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/pb ./pb
 
 EXPOSE 3000
-CMD ["npm", "start"]
+# Starts PocketBase, waits for it, then serves the app.
+CMD ["node", "scripts/setup.mjs"]

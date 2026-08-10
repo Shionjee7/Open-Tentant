@@ -5,8 +5,8 @@ import { Badge, EmptyState, PageHeader } from "@/components/ui";
 
 export const metadata = { title: "Properties" };
 
-export default function PropertiesPage() {
-  const properties = listProperties();
+export default async function PropertiesPage() {
+  const properties = await listProperties();
   return (
     <>
       <PageHeader

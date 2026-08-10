@@ -11,8 +11,8 @@ import { loadDemoData } from "@/lib/actions";
 import { money, shortDate, daysUntil } from "@/lib/format";
 import { Badge, EmptyState, PageHeader, StatCard } from "@/components/ui";
 
-export default function DashboardPage() {
-  if (isDatabaseEmpty()) {
+export default async function DashboardPage() {
+  if (await isDatabaseEmpty()) {
     return (
       <>
         <PageHeader
@@ -37,11 +37,11 @@ export default function DashboardPage() {
     );
   }
 
-  const stats = dashboardStats();
-  const pastDue = pastDuePayments();
-  const upcoming = upcomingPayments();
-  const expiring = leasesExpiringWithin(90);
-  const openMaint = listMaintenance().filter((m) => m.status === "new" || m.status === "in_progress");
+  const stats = await dashboardStats();
+  const pastDue = await pastDuePayments();
+  const upcoming = await upcomingPayments();
+  const expiring = await leasesExpiringWithin(90);
+  const openMaint = (await listMaintenance()).filter((m) => m.status === "new" || m.status === "in_progress");
 
   return (
     <>
@@ -125,7 +125,7 @@ export default function DashboardPage() {
                 <li key={m.id} className="flex items-center justify-between px-4 py-3 text-sm">
                   <div>
                     <div className="font-medium">{m.title}</div>
-                    <div className="text-xs text-ink-500">{m.property_name} · {shortDate(m.created_at)}</div>
+                    <div className="text-xs text-ink-500">{m.property_name} · {shortDate(m.created)}</div>
                   </div>
                   <div className="flex gap-1.5">
                     <Badge value={m.priority} />
