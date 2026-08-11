@@ -1,17 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, adminPassword, isPublicPath, safeEqual, sessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, authGateEnabled, isPublicPath, readSession } from "@/lib/auth";
 
 export async function middleware(request: NextRequest) {
-  const password = adminPassword();
-  // No password configured — the app runs open (fine on your own machine).
-  if (!password) return NextResponse.next();
+  // Neither a password nor Google sign-in is configured — the app runs open
+  // (fine on your own machine, not fine on a public host).
+  if (!authGateEnabled()) return NextResponse.next();
 
   const { pathname } = request.nextUrl;
   if (isPublicPath(pathname)) return NextResponse.next();
 
-  const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
-  const expected = await sessionToken(password);
-  if (cookie && safeEqual(cookie, expected)) return NextResponse.next();
+  const identity = await readSession(request.cookies.get(SESSION_COOKIE)?.value);
+  if (identity) return NextResponse.next();
 
   const loginUrl = new URL("/login", request.url);
   if (pathname !== "/") loginUrl.searchParams.set("next", pathname);

@@ -19,7 +19,7 @@ const NAV: { href: string; label: string; icon: string }[] = [
   { href: "/settings", label: "Settings", icon: "⚙" },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ identity }: { identity?: string | null }) {
   const pathname = usePathname();
   return (
     <aside className="flex w-60 shrink-0 flex-col bg-[#0f1b33] text-slate-300">
@@ -58,6 +58,12 @@ export default function Sidebar() {
         <Link href="/listings" className="hover:text-white" target="_blank">
           View public listings ↗
         </Link>
+        {identity && (
+          <form action="/api/auth/signout" method="POST" className="mt-2 flex items-center justify-between gap-2">
+            <span className="truncate" title={identity}>{identity}</span>
+            <button className="shrink-0 text-slate-400 hover:text-white hover:underline">Sign out</button>
+          </form>
+        )}
       </div>
     </aside>
   );

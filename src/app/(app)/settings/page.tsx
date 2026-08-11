@@ -4,6 +4,13 @@ import { archiveQuestion, createQuestion, saveSettings, sendTestEmail } from "@/
 import { PageHeader, ProBadge } from "@/components/ui";
 import EmailSettings from "@/components/EmailSettings";
 import { titleCase } from "@/lib/format";
+import {
+  adminPassword,
+  authGateEnabled,
+  googleAllowlistCount,
+  googleCredentialsConfigured,
+  googleSignInEnabled,
+} from "@/lib/auth";
 
 export const metadata = { title: "Settings" };
 
@@ -192,6 +199,78 @@ export default async function SettingsPage({
             </div>
             <button className="btn-secondary">Send test</button>
           </form>
+        </section>
+
+        <section id="security" className="card p-6">
+          <h2 className="font-semibold">Sign-in &amp; security</h2>
+          <p className="mt-1 text-xs text-ink-500">
+            Google sign-in and the shared password are configured through environment variables,
+            not this form — that keeps the login gate checkable without a database round trip, so a
+            database outage can never accidentally unlock the app.
+          </p>
+
+          <dl className="mt-4 space-y-3 text-sm">
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+              <dt>Login gate</dt>
+              <dd className={authGateEnabled() ? "font-medium text-emerald-600" : "font-medium text-amber-600"}>
+                {authGateEnabled() ? "On" : "Off — anyone with the URL has full access"}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+              <dt>Shared password</dt>
+              <dd className={adminPassword() ? "font-medium text-emerald-600" : "text-ink-500"}>
+                {adminPassword() ? "Set" : "Not set"}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+              <dt>Google sign-in</dt>
+              <dd className={googleSignInEnabled() ? "font-medium text-emerald-600" : "text-ink-500"}>
+                {googleSignInEnabled()
+                  ? `On · ${googleAllowlistCount()} account${googleAllowlistCount() === 1 ? "" : "s"} allowed`
+                  : googleCredentialsConfigured()
+                    ? "Credentials set, but no allowed accounts yet"
+                    : "Not configured"}
+              </dd>
+            </div>
+          </dl>
+
+          <details className="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-ink-500">
+            <summary className="cursor-pointer font-medium text-ink-700">
+              How to turn on Google sign-in
+            </summary>
+            <ol className="mt-2 list-decimal space-y-1 pl-4">
+              <li>
+                In the{" "}
+                <a
+                  href="https://console.cloud.google.com/apis/credentials"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-brand-600 underline"
+                >
+                  Google Cloud Console
+                </a>
+                , create an OAuth client (type: Web application).
+              </li>
+              <li>
+                Add this authorized redirect URI:{" "}
+                <code className="rounded bg-white px-1 py-0.5">
+                  {(await getSetting("app_url")) || "https://your-domain.com"}/api/auth/google/callback
+                </code>
+              </li>
+              <li>
+                Set these environment variables and restart the app:
+                <pre className="mt-1 overflow-x-auto rounded bg-white p-2">
+{`GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_ALLOWED_EMAILS=you@gmail.com,partner@gmail.com`}
+                </pre>
+              </li>
+            </ol>
+            <p className="mt-2">
+              Only the emails listed in <code>GOOGLE_ALLOWED_EMAILS</code> can sign in — being a
+              real Google account isn&apos;t enough on its own.
+            </p>
+          </details>
         </section>
 
         <section id="questions" className="card p-6">

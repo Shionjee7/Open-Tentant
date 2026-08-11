@@ -6,8 +6,9 @@ persists under `$DATA_DIR/pb_data`. Two rules make every deploy work:
 
 1. **Mount a persistent volume at your `DATA_DIR`** — otherwise your properties,
    tenants, and payments reset every time the service restarts.
-2. **Set `ADMIN_PASSWORD`** — without it the landlord dashboard is open to anyone
-   who has the URL. (See [Security](#security) below.)
+2. **Turn on a login gate** — set `ADMIN_PASSWORD`, or configure Google sign-in with
+   `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_ALLOWED_EMAILS`. Without one,
+   the dashboard is open to anyone who has the URL. (See [Security](#security) below.)
 
 ---
 
@@ -72,9 +73,24 @@ OpenTenant separates **your** pages from **public** pages:
 | `/listings`, `/apply/[id]` | Anyone (that's the point — prospects apply) |
 | `/portal/[token]` | The tenant holding that unguessable link |
 
-Set `ADMIN_PASSWORD` to a long random string before exposing the app to the
-internet. Without it the gate is disabled and **anyone with the URL can see and
-edit everything** — fine on your laptop, not fine on a public host.
+Turn on a login gate before exposing the app to the internet — either a shared
+password (`ADMIN_PASSWORD`) or Google sign-in. With neither, **anyone with the URL
+can see and edit everything** — fine on your laptop, not fine on a public host.
+
+**Google sign-in** needs an OAuth client from the
+[Google Cloud Console](https://console.cloud.google.com/apis/credentials) with the redirect
+URI `https://your-domain.com/api/auth/google/callback`, then:
+
+```
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_ALLOWED_EMAILS=you@gmail.com,partner@gmail.com
+AUTH_SECRET=a-long-random-string
+```
+
+`GOOGLE_ALLOWED_EMAILS` is not optional: without it every Google login is refused, because
+otherwise anyone on earth with a Google account could sign into your dashboard. Set
+`AUTH_SECRET` too — sessions are signed with it, and rotating it signs everyone out.
 
 Tenant portal links are random UUIDs, so they act as magic links: anyone with a
 tenant's link can see that tenant's balance and history. Share them privately,

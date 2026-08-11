@@ -63,8 +63,9 @@ database console is at http://127.0.0.1:8090/_/.
 See **[docs/DEPLOY.md](docs/DEPLOY.md)** for Render (one-click blueprint included), Railway,
 Fly.io, and plain Docker. Two things matter wherever you host it:
 
-- **Set `ADMIN_PASSWORD`** — this turns on the login gate for your dashboard. Without it the
-  app runs open, which is fine on your laptop and *not* fine on a public URL.
+- **Turn on a login gate** — either `ADMIN_PASSWORD` (a shared password) or Google sign-in
+  (below). Without one, the app runs open, which is fine on your laptop and *not* fine on a
+  public URL.
 - **Mount a persistent volume and point `DATA_DIR` at it** (e.g. `DATA_DIR=/var/data`) so
   your data survives restarts.
 
@@ -73,6 +74,16 @@ With Docker on any server you own:
 ```bash
 ADMIN_PASSWORD="a-long-random-password" docker compose up -d
 ```
+
+### Signing in with Google
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an
+   OAuth client (type: **Web application**).
+2. Add the authorized redirect URI: `https://your-domain.com/api/auth/google/callback`
+3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_ALLOWED_EMAILS`, then restart.
+
+Only the emails in `GOOGLE_ALLOWED_EMAILS` can get in — having a valid Google account is not
+enough by itself. Settings → **Sign-in & security** shows whether the gate is actually on.
 
 ### Who can reach what
 
@@ -88,7 +99,10 @@ Every setting is optional — the app runs with none of them.
 
 | Variable | What it does |
 |---|---|
-| `ADMIN_PASSWORD` | Enables the login gate. Required for any public deployment. |
+| `ADMIN_PASSWORD` | Shared-password login. Either this or Google sign-in is required for any public deployment. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in credentials from the Google Cloud Console. |
+| `GOOGLE_ALLOWED_EMAILS` | Comma-separated emails allowed to sign in with Google. Required — no allowlist, no Google access. |
+| `AUTH_SECRET` | Signs session cookies. Set it on any real deployment. |
 | `DATA_DIR` | Where the database lives. Point at your mounted volume. |
 | `PB_ADMIN_PASSWORD` | Database console password. Change it on any shared machine. |
 | `PB_PORT` / `PB_URL` | Where PocketBase listens / how the app reaches it. |
@@ -112,7 +126,7 @@ startup, so upgrading is `git pull` with no manual steps.
 
 ## Roadmap
 
-- [ ] Multi-user auth (multiple landlord accounts; today it's a single shared password)
+- [ ] Per-user roles (today every signed-in account has full access)
 - [ ] Optional Stripe integration for in-app card & ACH payments
 - [ ] Direct e-sign API integration instead of pasted links
 - [ ] File uploads in the UI (the collections already accept them)
