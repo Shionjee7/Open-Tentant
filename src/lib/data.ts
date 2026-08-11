@@ -534,6 +534,73 @@ export async function listBankImports(status?: string): Promise<BankImport[]> {
   return status ? decorated.filter((d) => d.status === status) : decorated;
 }
 
+/**
+ * What the books look like now, and where they head if nothing changes.
+ *
+ * The projection is deliberately simple and states its own assumption: every
+ * currently-active lease keeps paying its rent, and the last twelve months of
+ * expenses repeat. It is a planning aid, not a forecast.
+ */
+export async function financialOutlook() {
+  const [transactions, leases, payments] = await Promise.all([
+    fetchAll<Txn>("transactions"),
+    listLeases(),
+    fetchAll<Payment>("payments"),
+  ]);
+
+  const income = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const expenses = transactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+
+  const monthStart = startOfMonth();
+  const incomeThisMonth = transactions
+    .filter((t) => t.type === "income" && t.date >= monthStart)
+    .reduce((s, t) => s + t.amount, 0);
+  const expensesThisMonth = transactions
+    .filter((t) => t.type === "expense" && t.date >= monthStart)
+    .reduce((s, t) => s + t.amount, 0);
+
+  // Twelve-month trailing expense rate, so the projection isn't rent-only.
+  const yearAgo = new Date();
+  yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+  const since = yearAgo.toISOString().slice(0, 10);
+  const trailingExpenses = transactions
+    .filter((t) => t.type === "expense" && t.date >= since)
+    .reduce((s, t) => s + t.amount, 0);
+  const monthlyExpenseRate = trailingExpenses / 12;
+
+  const activeLeases = leases.filter((l) => l.status === "active");
+  const monthlyRent = activeLeases.reduce((s, l) => s + l.rent, 0);
+  const monthlyNet = monthlyRent - monthlyExpenseRate;
+
+  const outstanding = payments
+    .filter((p) => p.status !== "paid")
+    .reduce((s, p) => s + p.amount, 0);
+
+  const onHand = income - expenses;
+  const projections = [1, 2, 3, 4, 5].map((years) => ({
+    years,
+    rent: monthlyRent * 12 * years,
+    expenses: monthlyExpenseRate * 12 * years,
+    net: monthlyNet * 12 * years,
+    balance: onHand + monthlyNet * 12 * years,
+  }));
+
+  return {
+    income,
+    expenses,
+    onHand,
+    incomeThisMonth,
+    expensesThisMonth,
+    netThisMonth: incomeThisMonth - expensesThisMonth,
+    monthlyRent,
+    monthlyExpenseRate,
+    monthlyNet,
+    activeLeaseCount: activeLeases.length,
+    outstanding,
+    projections,
+  };
+}
+
 // ---------- Dashboard ----------
 
 export async function dashboardStats() {

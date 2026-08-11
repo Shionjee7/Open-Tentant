@@ -12,6 +12,7 @@ machine, in a database you control.
 
 | Module | What it does |
 |---|---|
+| **Start here** | A six-step guided setup that tells you what's done and what's next, so a first-time landlord never faces a blank dashboard |
 | **Dashboard** | Occupancy, active tenants & leases, collected this month/year, past due, open maintenance, expiring leases |
 | **Properties** | Full property records with rent, deposit, amenities, and listing controls — plus **address autocomplete** that fills city, state, and ZIP |
 | **Rent by the room** | Rent a house room by room: each room has its own rent, deposit, tenant, lease, and listing |
@@ -19,15 +20,15 @@ machine, in a database you control.
 | **Leads & Tenants** | Pipeline from lead → applicant → tenant → past tenant, with one-click stage moves |
 | **Applications** | Online applications with **custom questions**, an automatic income-to-rent check, and income verification |
 | **Tenant screening** | Track credit/criminal/eviction screening through any FCRA bureau — the applicant pays, you pay nothing ([how it works](docs/HOW-IT-WORKS.md)) |
-| **Leases & e-signing** | Generates a complete, printable lease from your data, then sends it for signature through [OpenSign](https://www.opensignlabs.com) — free self-hosted, with optional API automation |
+| **Leases & e-signing** | Writes a complete lease from your data — summary, rent and deposits, penalties and fees, and full clauses, with your own fee amounts and house rules set once in Settings — then sends it for signature through [OpenSign](https://www.opensignlabs.com) — free self-hosted, with optional API automation |
 | **Payments** | Schedule rent up to 24 months ahead, accept any method (Zelle, ACH, card, cash, check), automatic past-due tracking |
-| **Banking & Deposits** | Record which account each property's rent lands in, **import bank/Zelle/Cash App statements**, and assign each deposit to the tenant who paid — auto-suggested by amount, name, and due date |
+| **Banking & Deposits** | Record which account each property's rent lands in, **import bank/Zelle/Cash App statements**, and assign each deposit to the tenant who paid — auto-suggested by amount, name, and due date, with anything you already recorded parked aside so nothing counts twice |
 | **Tenant portal** | Private per-tenant link: balance due, **"I paid this"** reporting (you approve), payment history, maintenance requests |
 | **Maintenance** | Requests with priority and status workflow, from tenants or you |
 | **Documents & E-Sign** | Track documents through signing via open-source tools ([Documenso](https://documenso.com), [DocuSeal](https://www.docuseal.com), [OpenSign](https://www.opensignlabs.com)) |
 | **Condition reports** | 12-area move-in/move-out checklists that lock when completed |
-| **Accounting & Insights** | Approved payments auto-book as income; expenses by category; income-vs-expense chart; net profit |
-| **Email notifications** | Connect Gmail (or any SMTP) and the app confirms applications, alerts you to new ones, sends approval/denial notices, rent reminders, payment receipts, portal invites, and maintenance updates |
+| **Accounting & Insights** | Approved payments auto-book as income; expenses by category; income-vs-expense chart; money kept; and 1–5 year projections from your current leases |
+| **Email notifications** | Connect Gmail (or any SMTP) and the app confirms applications, alerts you to new ones, sends approval/denial notices, rent reminders, portal invites, maintenance updates, and **month-end rent receipts** with your business name and address |
 | **Resources** | Built-in guides for screening, rent collection, room rentals, and reconciliation |
 
 ## Screenshots

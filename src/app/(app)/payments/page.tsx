@@ -6,6 +6,7 @@ import {
   deletePayment,
   markPaymentPaid,
   rejectReportedPayment,
+  sendMonthlyReceipts,
   sendPaymentReminder,
 } from "@/lib/actions";
 import { money, moneyExact, shortDate, titleCase } from "@/lib/format";
@@ -13,7 +14,13 @@ import { Badge, EmptyState, PageHeader, StatCard } from "@/components/ui";
 
 export const metadata = { title: "Payments" };
 
-export default async function PaymentsPage() {
+export default async function PaymentsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ receipts?: string; noreceipt?: string; mail?: string }>;
+}) {
+  const { receipts, noreceipt, mail } = await searchParams;
+  const thisMonth = new Date().toISOString().slice(0, 7);
   const payments = await listPayments();
   const reported = await reportedPayments();
   const methods = await getSetting("payment_methods");
@@ -30,6 +37,36 @@ export default async function PaymentsPage() {
         }
         action={<Link href="/payments/new" className="btn">+ Record / schedule</Link>}
       />
+
+      {(receipts || mail) && (
+        <div className="card mb-5 border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {receipts && (
+            <>
+              Emailed <strong>{receipts}</strong> receipt{receipts === "1" ? "" : "s"}
+              {noreceipt && Number(noreceipt) > 0 &&
+                ` · skipped ${noreceipt} (nothing paid that month, or no email address)`}.
+            </>
+          )}
+          {mail === "sent" && "Reminder sent."}
+          {mail === "failed" && "Couldn't send — check your email settings."}
+          {mail === "noaddress" && "That tenant has no email address."}
+        </div>
+      )}
+
+      <section className="card mb-6 p-5">
+        <h2 className="font-semibold">Month-end receipts</h2>
+        <p className="mt-1 text-xs text-ink-500">
+          Emails each tenant a receipt for what they actually paid that month — your business name and
+          address, the property and room, every payment itemized, and the total.
+        </p>
+        <form action={sendMonthlyReceipts} className="mt-3 flex flex-wrap items-end gap-2">
+          <div>
+            <label className="label">Month</label>
+            <input name="month" type="month" defaultValue={thisMonth} className="input w-48" />
+          </div>
+          <button className="btn">Send receipts</button>
+        </form>
+      </section>
 
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">
         <StatCard label="Collected this month" value={money(await sumPaid("month"))} tone="good" />

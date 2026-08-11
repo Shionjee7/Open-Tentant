@@ -32,14 +32,15 @@ const KINDS = [
 export default async function BankingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ imported?: string; skipped?: string; error?: string }>;
+  searchParams: Promise<{ imported?: string; skipped?: string; error?: string; duplicates?: string }>;
 }) {
-  const { imported, skipped, error } = await searchParams;
+  const { imported, skipped, error, duplicates } = await searchParams;
   const accounts = await listBankAccounts();
   const properties = await listProperties();
   const unmatched = await listBankImports("unmatched");
   const matched = await listBankImports("matched");
   const ignored = await listBankImports("ignored");
+  const alreadyRecorded = await listBankImports("already_recorded");
   const candidates = await openPayments();
 
   const unmatchedTotal = unmatched.reduce((sum, d) => sum + d.amount, 0);
@@ -63,7 +64,9 @@ export default async function BankingPage({
           {imported && (
             <>
               Imported <strong>{imported}</strong> deposit{imported === "1" ? "" : "s"}
-              {skipped && Number(skipped) > 0 && ` · skipped ${skipped} (already imported, or not a deposit)`}.
+              {skipped && Number(skipped) > 0 && ` · skipped ${skipped} (already imported, or not a deposit)`}
+              {duplicates && Number(duplicates) > 0 &&
+                ` · ${duplicates} already recorded, so they won't be counted twice`}.
             </>
           )}
         </div>
@@ -75,6 +78,44 @@ export default async function BankingPage({
         <StatCard label="Unassigned total" value={moneyExact(unmatchedTotal)} />
         <StatCard label="Assigned" value={matched.length} tone="good" />
       </div>
+
+      {alreadyRecorded.length > 0 && (
+        <section className="card mb-6 border-slate-200">
+          <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
+            <h2 className="font-semibold">Already recorded ({alreadyRecorded.length})</h2>
+            <p className="text-xs text-ink-500">
+              These bank deposits match payments you already logged — usually because the tenant
+              reported paying and you approved it. They are kept here so your books stay right and the
+              money is never counted twice.
+            </p>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {alreadyRecorded.map((deposit) => (
+              <li key={deposit.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-sm">
+                <div className="min-w-0">
+                  <span className="font-medium" style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {moneyExact(deposit.amount)}
+                  </span>
+                  <span className="ml-2 text-ink-500">{shortDate(deposit.posted_date)}</span>
+                  <div className="truncate text-xs text-ink-500">{deposit.description}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {deposit.matched_tenant && (
+                    <span className="text-xs text-ink-700">{deposit.matched_tenant}</span>
+                  )}
+                  <Badge value="paid" label="Counted once" />
+                  <form action={unignoreImport}>
+                    <input type="hidden" name="id" value={deposit.id} />
+                    <button className="btn-secondary btn-sm" title="Treat this as a separate payment after all">
+                      Not a duplicate
+                    </button>
+                  </form>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* ---------------- Deposits needing review ---------------- */}
       <section className="card mb-6">

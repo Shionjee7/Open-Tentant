@@ -33,6 +33,16 @@ export default async function SettingsPage({
             <input name="business_name" defaultValue={await getSetting("business_name")} className="input" placeholder="Sunrise Property Management" />
           </div>
           <div>
+            <label className="label">Business address (appears on leases and receipts)</label>
+            <textarea
+              name="business_address"
+              rows={2}
+              defaultValue={await getSetting("business_address")}
+              className="input"
+              placeholder={"PO Box 100\nColumbus, OH 43004"}
+            />
+          </div>
+          <div>
             <label className="label">Accepted payment methods</label>
             <input
               name="payment_methods"
@@ -198,6 +208,82 @@ export default async function SettingsPage({
               />
             </div>
             <button className="btn-secondary">Send test</button>
+          </form>
+        </section>
+
+        <section id="lease" className="card p-6">
+          <h2 className="font-semibold">Lease terms</h2>
+          <p className="mt-1 text-xs text-ink-500">
+            These fill in the lease the app writes for you. Set them once; every new lease uses them.
+            Leave a fee at 0 to drop that clause entirely.
+          </p>
+          <form action={saveSettings} className="mt-4 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Late fee ($)</label>
+                <input name="lease_late_fee" type="number" min="0" defaultValue={await getSetting("lease_late_fee", "50")} className="input" />
+              </div>
+              <div>
+                <label className="label">Late after (days)</label>
+                <input name="lease_late_after_days" type="number" min="0" defaultValue={await getSetting("lease_late_after_days", "3")} className="input" />
+              </div>
+              <div>
+                <label className="label">Eviction notice after (days)</label>
+                <input name="lease_eviction_after_days" type="number" min="0" defaultValue={await getSetting("lease_eviction_after_days", "7")} className="input" />
+              </div>
+              <div>
+                <label className="label">Move-out notice (days)</label>
+                <input name="lease_notice_days" type="number" min="0" defaultValue={await getSetting("lease_notice_days", "30")} className="input" />
+              </div>
+              <div>
+                <label className="label">Cleaning fee ($)</label>
+                <input name="lease_cleaning_fee" type="number" min="0" defaultValue={await getSetting("lease_cleaning_fee", "55")} className="input" />
+              </div>
+              <div>
+                <label className="label">Unreturned key ($)</label>
+                <input name="lease_key_fee" type="number" min="0" defaultValue={await getSetting("lease_key_fee", "30")} className="input" />
+              </div>
+              <div>
+                <label className="label">Smoking inside ($)</label>
+                <input name="lease_smoking_fee" type="number" min="0" defaultValue={await getSetting("lease_smoking_fee", "350")} className="input" />
+              </div>
+              <div>
+                <label className="label">Detector tampering ($)</label>
+                <input name="lease_detector_fee" type="number" min="0" defaultValue={await getSetting("lease_detector_fee", "100")} className="input" />
+              </div>
+              <div>
+                <label className="label">Winter surcharge ($/mo)</label>
+                <input name="lease_winter_surcharge" type="number" min="0" defaultValue={await getSetting("lease_winter_surcharge", "0")} className="input" />
+              </div>
+              <div>
+                <label className="label">Winter months</label>
+                <input name="lease_winter_months" defaultValue={await getSetting("lease_winter_months", "December through March")} className="input" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Governing state</label>
+                <input name="lease_state" defaultValue={await getSetting("lease_state")} className="input" placeholder="Virginia" />
+              </div>
+              <div>
+                <label className="label">Pets</label>
+                <select name="lease_pets_allowed" defaultValue={await getSetting("lease_pets_allowed", "false")} className="input">
+                  <option value="false">Not permitted</option>
+                  <option value="true">Permitted with written consent</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="label">Extra house rules (one per line)</label>
+              <textarea
+                name="lease_house_rules"
+                rows={3}
+                defaultValue={await getSetting("lease_house_rules")}
+                className="input"
+                placeholder={"No shoes on the carpets\nNo space heaters or electric heating devices"}
+              />
+            </div>
+            <button className="btn">Save lease terms</button>
           </form>
         </section>
 

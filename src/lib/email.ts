@@ -282,6 +282,64 @@ export const templates = {
     };
   },
 
+  /**
+   * End-of-month receipt: what this tenant actually paid, itemized, with your
+   * business details on it so it works as a record for them.
+   */
+  monthlyReceipt(options: {
+    businessName: string;
+    businessAddress: string;
+    tenantName: string;
+    propertyLabel: string;
+    periodLabel: string;
+    lines: { date: string; description: string; method: string; amount: string }[];
+    total: string;
+    balanceNote?: string;
+  }) {
+    const rows = options.lines
+      .map(
+        (line) => `
+        <tr>
+          <td style="padding:7px 0;border-bottom:1px solid #eef1f6;">${escapeHtml(line.date)}</td>
+          <td style="padding:7px 0;border-bottom:1px solid #eef1f6;">${escapeHtml(line.description)}</td>
+          <td style="padding:7px 0;border-bottom:1px solid #eef1f6;color:#5b6478;">${escapeHtml(line.method)}</td>
+          <td style="padding:7px 0;border-bottom:1px solid #eef1f6;text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(line.amount)}</td>
+        </tr>`
+      )
+      .join("");
+
+    return {
+      subject: `Rent receipt — ${options.periodLabel}`,
+      html: shell(
+        options.businessName,
+        `Receipt for ${options.periodLabel}`,
+        p(`Hi ${escapeHtml(options.tenantName)},`) +
+          p(`Thank you — here is your receipt for <strong>${escapeHtml(options.propertyLabel)}</strong>.`) +
+          `<table style="width:100%;border-collapse:collapse;font-size:14px;margin:14px 0 4px;">
+             <thead>
+               <tr style="text-align:left;color:#5b6478;font-size:12px;text-transform:uppercase;letter-spacing:.04em;">
+                 <th style="padding-bottom:6px;">Date</th>
+                 <th style="padding-bottom:6px;">For</th>
+                 <th style="padding-bottom:6px;">Method</th>
+                 <th style="padding-bottom:6px;text-align:right;">Amount</th>
+               </tr>
+             </thead>
+             <tbody>${rows}</tbody>
+             <tfoot>
+               <tr>
+                 <td colspan="3" style="padding-top:10px;font-weight:700;">Total paid</td>
+                 <td style="padding-top:10px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;">${escapeHtml(options.total)}</td>
+               </tr>
+             </tfoot>
+           </table>` +
+          (options.balanceNote ? p(`<span style="color:#b45309;">${escapeHtml(options.balanceNote)}</span>`) : "") +
+          `<p style="margin:18px 0 0;font-size:12px;color:#5b6478;">
+             ${escapeHtml(options.businessName)}${options.businessAddress ? `<br />${escapeHtml(options.businessAddress).replace(/\n/g, "<br />")}` : ""}
+           </p>`
+      ),
+    };
+  },
+
   test(businessName: string) {
     return {
       subject: "OpenTenant test email",

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { countPeopleByStage, listPeople, listProperties } from "@/lib/data";
-import { createPerson, sendPortalInvite, setPersonStage } from "@/lib/actions";
+import { createPerson, moveOutTenant, sendPortalInvite, setPersonStage } from "@/lib/actions";
 import { shortDate } from "@/lib/format";
 import { Badge, EmptyState, PageHeader } from "@/components/ui";
 
@@ -23,9 +23,9 @@ const NEXT_STAGE: Record<string, { stage: string; label: string }> = {
 export default async function ContactsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ stage?: string }>;
+  searchParams: Promise<{ stage?: string; moved?: string; mail?: string }>;
 }) {
-  const { stage: rawStage } = await searchParams;
+  const { stage: rawStage, moved, mail } = await searchParams;
   const stage = STAGES.some((s) => s.key === rawStage) ? rawStage! : "lead";
   const people = await listPeople(stage);
   const counts = await countPeopleByStage();
@@ -37,6 +37,15 @@ export default async function ContactsPage({
         title="Leads & Tenants"
         subtitle="Track everyone from first inquiry to move-out — leads, applicants, active tenants, and past tenants."
       />
+
+      {(moved || mail) && (
+        <div className="card mb-5 border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {moved === "1" && "Moved out — their lease is ended, the room is free, and they're filed under past tenants."}
+          {mail === "sent" && "Portal link emailed."}
+          {mail === "failed" && "Couldn't send the email — check your email settings."}
+          {mail === "noaddress" && "That tenant has no email address."}
+        </div>
+      )}
 
       <div className="mb-5 flex gap-1 rounded-lg bg-slate-200/60 p-1 text-sm font-medium">
         {STAGES.map((s) => (
@@ -115,12 +124,24 @@ export default async function ContactsPage({
                                 )}
                               </>
                             )}
-                            {next && (
-                              <form action={setPersonStage} className="inline">
+                            {p.stage === "tenant" ? (
+                              <form action={moveOutTenant} className="inline">
                                 <input type="hidden" name="id" value={p.id} />
-                                <input type="hidden" name="stage" value={next.stage} />
-                                <button className="btn-secondary btn-sm">{next.label}</button>
+                                <button
+                                  className="btn-secondary btn-sm"
+                                  title="Ends their lease, frees the room, and files them under past tenants"
+                                >
+                                  Move out
+                                </button>
                               </form>
+                            ) : (
+                              next && (
+                                <form action={setPersonStage} className="inline">
+                                  <input type="hidden" name="id" value={p.id} />
+                                  <input type="hidden" name="stage" value={next.stage} />
+                                  <button className="btn-secondary btn-sm">{next.label}</button>
+                                </form>
+                              )
                             )}
                           </div>
                         </td>

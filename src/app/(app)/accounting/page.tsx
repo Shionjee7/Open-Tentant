@@ -1,4 +1,5 @@
 import {
+  financialOutlook,
   expensesByCategory,
   listProperties,
   listTransactions,
@@ -19,6 +20,7 @@ export default async function AccountingPage() {
   const byCategory = await expensesByCategory();
   const maxCat = Math.max(1, ...byCategory.map((c) => c.total));
   const properties = await listProperties();
+  const outlook = await financialOutlook();
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -37,6 +39,72 @@ export default async function AccountingPage() {
           tone={totals.income - totals.expenses >= 0 ? "good" : "bad"}
         />
       </div>
+
+      <section className="card mb-6 p-5">
+        <h2 className="font-semibold">Where you stand</h2>
+        <p className="mt-1 text-sm text-ink-700">
+          {outlook.activeLeaseCount === 0
+            ? "No active leases yet, so there's nothing to project from."
+            : `Your ${outlook.activeLeaseCount} active lease${outlook.activeLeaseCount === 1 ? "" : "s"} bring in ` +
+              `${money(outlook.monthlyRent)} a month. Averaged over the last year, expenses run ` +
+              `${money(outlook.monthlyExpenseRate)} a month, leaving about ${money(outlook.monthlyNet)} a month.`}
+        </p>
+
+        <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <StatCard label="This month in" value={money(outlook.incomeThisMonth)} tone="good" />
+          <StatCard label="This month out" value={money(outlook.expensesThisMonth)} tone="bad" />
+          <StatCard
+            label="This month net"
+            value={money(outlook.netThisMonth)}
+            tone={outlook.netThisMonth >= 0 ? "good" : "bad"}
+          />
+          <StatCard
+            label="Money kept so far"
+            value={money(outlook.onHand)}
+            hint="all income minus all expenses"
+          />
+        </div>
+
+        {outlook.outstanding > 0 && (
+          <p className="mt-3 text-sm text-amber-700">
+            {money(outlook.outstanding)} is still owed to you across unpaid and reported payments.
+          </p>
+        )}
+
+        {outlook.activeLeaseCount > 0 && (
+          <>
+            <h3 className="mt-6 text-sm font-semibold">If everything stays as it is today</h3>
+            <p className="mt-0.5 text-xs text-ink-500">
+              Assumes every active lease keeps paying and expenses continue at last year's average.
+              A planning aid, not a promise — vacancies and repairs will move these numbers.
+            </p>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[440px]">
+                <thead>
+                  <tr>
+                    <th className="th">Time</th>
+                    <th className="th text-right">Rent collected</th>
+                    <th className="th text-right">Expenses</th>
+                    <th className="th text-right">Net</th>
+                    <th className="th text-right">Money kept</th>
+                  </tr>
+                </thead>
+                <tbody style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {outlook.projections.map((row) => (
+                    <tr key={row.years} className="border-t border-slate-100">
+                      <td className="td font-medium">{row.years} year{row.years === 1 ? "" : "s"}</td>
+                      <td className="td text-right text-emerald-600">{money(row.rent)}</td>
+                      <td className="td text-right text-rose-600">{money(row.expenses)}</td>
+                      <td className="td text-right font-medium">{money(row.net)}</td>
+                      <td className="td text-right font-semibold">{money(row.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-[1fr_320px]">
         <section className="card p-5">

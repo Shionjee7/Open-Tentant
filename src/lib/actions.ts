@@ -8,11 +8,15 @@ import {
   getPerson,
   getSetting,
   leaseTenantIds,
+  listAllUnits,
+  listPayments,
+  listPeople,
+  listProperties,
   listQuestions,
   setSetting,
 } from "./data";
 import { seedDemoData } from "./seed";
-import { fingerprint, parseStatement } from "./statements";
+import { fingerprint, matchScore, parseStatement } from "./statements";
 import { createSignatureRequest, fetchDocumentStatus, hasApiAccess } from "./opensign";
 import { sendEmail, sendEmailQuietly, smtpConfig, templates } from "./email";
 import type { Id } from "./types";
@@ -896,8 +900,18 @@ export async function importStatement(form: FormData) {
   const existing = await client.collection("bank_imports").getFullList({ perPage: 1000 });
   const seen = new Set(existing.map((deposit) => deposit.fingerprint).filter(Boolean));
 
+  /**
+   * Payments already settled — usually because the tenant reported paying and
+   * you approved it. When the same money then shows up in a bank statement, it
+   * must not be bookable a second time, so those deposits are parked as
+   * "already recorded" instead of landing in the review queue.
+   */
+  const paidPayments = (await listPayments()).filter((p) => p.status === "paid");
+
   let imported = 0;
   let skipped = 0;
+  let alreadyRecorded = 0;
+
   for (const row of rows) {
     if (depositsOnly && row.amount <= 0) {
       skipped++;
@@ -908,21 +922,35 @@ export async function importStatement(form: FormData) {
       skipped++;
       continue;
     }
+
+    const duplicate = paidPayments.find(
+      (payment) =>
+        matchScore(row.description, row.amount, {
+          tenantName: payment.tenant_name ?? "",
+          amount: payment.amount,
+          dueDate: payment.paid_date || payment.due_date,
+          postedDate: row.posted_date,
+        }) >= 55
+    );
+
     await client.collection("bank_imports").create({
       account: accountId,
       posted_date: row.posted_date,
       description: row.description,
       amount: row.amount,
       source,
-      status: "unmatched",
+      status: duplicate ? "already_recorded" : "unmatched",
+      payment: duplicate?.id ?? "",
+      person: duplicate?.person ?? "",
       fingerprint: print,
     });
     seen.add(print);
     imported++;
+    if (duplicate) alreadyRecorded++;
   }
 
   refresh();
-  redirect(`/banking?imported=${imported}&skipped=${skipped}`);
+  redirect(`/banking?imported=${imported}&skipped=${skipped}&duplicates=${alreadyRecorded}`);
 }
 
 export async function matchImport(form: FormData) {
@@ -1163,6 +1191,129 @@ export async function sendPaymentReminder(form: FormData) {
   redirect(`/payments?mail=${result.ok ? "sent" : "failed"}`);
 }
 
+/**
+ * Emails every tenant a receipt for what they paid in a given month.
+ * Tenants with nothing paid that month are skipped rather than sent an empty
+ * receipt.
+ */
+export async function sendMonthlyReceipts(form: FormData) {
+  const month = s(form, "month") || new Date().toISOString().slice(0, 7); // YYYY-MM
+  const [payments, people, properties, units] = await Promise.all([
+    listPayments(),
+    listPeople("tenant"),
+    listProperties(),
+    listAllUnits(),
+  ]);
+
+  const business = await businessName();
+  const businessAddress = await getSetting("business_address");
+  const periodLabel = new Date(`${month}-01T00:00:00`).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+
+  let sent = 0;
+  let skipped = 0;
+
+  for (const tenant of people) {
+    if (!tenant.email) {
+      skipped++;
+      continue;
+    }
+
+    const theirs = payments.filter(
+      (payment) =>
+        payment.status === "paid" &&
+        payment.person === tenant.id &&
+        (payment.paid_date ?? "").startsWith(month)
+    );
+    if (theirs.length === 0) {
+      skipped++;
+      continue;
+    }
+
+    const property = properties.find((p) => p.id === tenant.property);
+    const unit = units.find((u) => u.id === tenant.unit);
+    const propertyLabel =
+      [property?.name, unit?.name].filter(Boolean).join(" — ") || "your rental";
+
+    const total = theirs.reduce((sum, payment) => sum + payment.amount, 0);
+
+    // Anything still owed for the same month, so the receipt isn't misleading.
+    const outstanding = payments
+      .filter(
+        (payment) =>
+          payment.person === tenant.id &&
+          payment.status !== "paid" &&
+          (payment.due_date ?? "").startsWith(month)
+      )
+      .reduce((sum, payment) => sum + payment.amount, 0);
+
+    const mail = templates.monthlyReceipt({
+      businessName: business,
+      businessAddress,
+      tenantName: `${tenant.first_name} ${tenant.last_name}`.trim(),
+      propertyLabel,
+      periodLabel,
+      lines: theirs.map((payment) => ({
+        date: payment.paid_date || payment.due_date,
+        description: payment.type === "rent" ? "Rent" : payment.type.replace(/_/g, " "),
+        method: payment.method || "—",
+        amount: payment.amount.toLocaleString("en-US", { style: "currency", currency: "USD" }),
+      })),
+      total: total.toLocaleString("en-US", { style: "currency", currency: "USD" }),
+      balanceNote:
+        outstanding > 0
+          ? `Still outstanding for ${periodLabel}: ${outstanding.toLocaleString("en-US", { style: "currency", currency: "USD" })}`
+          : undefined,
+    });
+
+    await sendEmailQuietly({ to: tenant.email, ...mail });
+    sent++;
+  }
+
+  refresh();
+  redirect(`/payments?receipts=${sent}&noreceipt=${skipped}`);
+}
+
+/**
+ * Moves a tenant out: ends their active lease, frees the room, and files them
+ * under past tenants. The one button a landlord actually reaches for when
+ * someone leaves.
+ */
+export async function moveOutTenant(form: FormData) {
+  const client = await pb();
+  const personId = s(form, "id");
+  const person = await client.collection("people").getOne(personId).catch(() => null);
+  if (!person) return;
+
+  const leases = await client
+    .collection("leases")
+    .getFullList({ perPage: 200, filter: `tenants~"${personId}"` })
+    .catch(() => []);
+
+  for (const lease of leases.filter((l) => l.status === "active" || l.status === "signed")) {
+    await client.collection("leases").update(lease.id, { status: "ended" });
+    if (lease.unit) {
+      await client.collection("units").update(lease.unit, { status: "vacant" });
+      await syncPropertyOccupancy(lease.property);
+    } else if (lease.property) {
+      await client.collection("properties").update(lease.property, { status: "vacant" });
+    }
+  }
+
+  // Free the room even when there was no lease record to end.
+  if (person.unit) {
+    await client.collection("units").update(person.unit, { status: "vacant" }).catch(() => {});
+    if (person.property) await syncPropertyOccupancy(person.property);
+  }
+
+  await client.collection("people").update(personId, { stage: "past", unit: "" });
+
+  refresh();
+  redirect("/contacts?stage=past&moved=1");
+}
+
 /** Sends a test message so you can prove the SMTP settings work. */
 export async function sendTestEmail(form: FormData) {
   const to = s(form, "to") || (await landlordInbox());
@@ -1188,6 +1339,15 @@ export async function saveSettings(form: FormData) {
   };
 
   await save("business_name");
+  await save("business_address");
+  for (const key of [
+    "lease_late_fee", "lease_late_after_days", "lease_eviction_after_days",
+    "lease_key_fee", "lease_cleaning_fee", "lease_notice_days",
+    "lease_smoking_fee", "lease_detector_fee", "lease_winter_surcharge",
+    "lease_winter_months", "lease_pets_allowed", "lease_house_rules", "lease_state",
+  ]) {
+    await save(key);
+  }
   await save("payment_instructions");
   await save("payment_methods");
   await save("esign_provider");
