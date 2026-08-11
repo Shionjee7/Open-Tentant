@@ -89,7 +89,7 @@ enough by itself. Settings → **Sign-in & security** shows whether the gate is 
 
 | Route | Access |
 |---|---|
-| `/`, `/properties`, `/payments`, `/banking`, … | You — password required |
+| `/`, `/properties`, `/payments`, `/banking`, … | You — sign-in required |
 | `/listings`, `/apply/[id]` | Public, by design (prospects browse and apply) |
 | `/portal/[token]` | The tenant holding that unguessable link |
 
