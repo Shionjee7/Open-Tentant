@@ -181,3 +181,25 @@ export async function openSignBundled(): Promise<boolean> {
   const url = await openSignAppUrl();
   return url.includes("localhost") || url.includes("127.0.0.1");
 }
+
+/**
+ * Is the signing app actually up?
+ *
+ * The page that embeds OpenSign asks this so it can show setup instructions
+ * instead of an empty frame. Kept short — a landlord shouldn't wait on a
+ * service that isn't running.
+ */
+export async function openSignReachable(): Promise<boolean> {
+  const url = await openSignAppUrl();
+  if (!url || url.includes("app.opensignlabs.com")) return false;
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(1500),
+      redirect: "manual",
+      cache: "no-store",
+    });
+    return response.status < 500;
+  } catch {
+    return false;
+  }
+}

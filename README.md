@@ -29,12 +29,14 @@ so you can never get lost.
 | **Tenants** | Pipeline from lead → applicant → tenant → past tenant, with one-click stage moves |
 | **Applications** | Online applications with **custom questions**, an automatic income-to-rent check, and income verification |
 | **Tenant screening** | Track credit/criminal/eviction screening through any FCRA bureau — the applicant pays, you pay nothing ([how it works](docs/HOW-IT-WORKS.md)) |
-| **Leases & e-signing** | Writes a complete lease from your data — summary, rent and deposits, penalties and fees, and full clauses, with your own fee amounts and house rules set once in Settings — then sends it for signature through [OpenSign](https://www.opensignlabs.com) — free self-hosted, with optional API automation |
+| **Leases** | Writes a complete lease from your data — summary, rent and deposits, penalties and fees, and full clauses, with your own fee amounts and house rules set once in Settings |
+| **E-signatures, built in** | Emails each signer a private link; they read the lease, consent, and sign by typing or drawing their name. Full audit trail — consent text, IP, timestamp, and a SHA-256 of the terms signed — printed as a certificate of completion. Unlimited, no per-document fee, no second service |
+| **Signing app (optional)** | `npm run esign` starts [OpenSign](https://www.opensignlabs.com) next to OpenTenant and shows it inside the app, for signing documents that aren't leases |
 | **Rent** | Schedule rent up to 24 months ahead, accept any method (Zelle, ACH, card, cash, check), automatic past-due tracking |
 | **Bank deposits** | Record which account each property's rent lands in, **import bank/Zelle/Cash App statements**, and assign each deposit to the tenant who paid — auto-suggested by amount, name, and due date, with anything you already recorded parked aside so nothing counts twice |
 | **Tenant portal** | Private per-tenant link: balance due, **"I paid this"** reporting (you approve), payment history, maintenance requests |
 | **Repairs** | Requests with priority and status workflow, from tenants or you |
-| **Documents** | Track documents through signing via open-source tools ([Documenso](https://documenso.com), [DocuSeal](https://www.docuseal.com), [OpenSign](https://www.opensignlabs.com)) |
+| **Documents** | Track leases, addenda, and notices from draft → sent → signed |
 | **Condition reports** | 12-area move-in/move-out checklists that lock when completed |
 | **Accounting** | Approved payments auto-book as income; expenses by category; income-vs-expense chart; money kept; and 1–5 year projections from your current leases |
 | **Email notifications** | Connect Gmail (or any SMTP) and the app confirms applications, alerts you to new ones, sends approval/denial notices, rent reminders, portal invites, maintenance updates, and **month-end rent receipts** with your business name and address |
@@ -67,6 +69,31 @@ or add your first property and start clean.
 For day-to-day development, run `npm run pb` in one terminal and `npm run dev` in another.
 Everything lives in `data/pb_data/` — back up that folder and you've backed up everything. The
 database console is at http://127.0.0.1:8090/_/.
+
+## Signing leases
+
+Open a lease and press **Send for signature**. Each tenant gets a private link by email,
+reads the lease in their browser, agrees to sign electronically, and signs by typing or
+drawing their name. You sign from the lease page. When the last person signs, everyone is
+emailed their copy and the lease is marked signed.
+
+Every signature carries the record that makes it hold up — the consent agreed to, word
+for word; the time; the IP address; and a SHA-256 fingerprint of the exact terms shown.
+Edit the lease afterwards and the fingerprint stops matching, so the app tells you instead
+of quietly disagreeing with its own signatures. It all prints with the lease as a
+certificate of completion. (Not legal advice — some documents can't be signed
+electronically at all.)
+
+### Signing something that isn't a lease
+
+```bash
+npm run esign
+```
+
+That starts [OpenSign](https://www.opensignlabs.com) — an open-source signing app — as
+extra containers alongside OpenTenant, and it appears under **Signing app** in the menu,
+inside the app rather than at a separate address. Documents stay on your machine. Needs
+Docker; nothing else changes if you skip it.
 
 ## Deploy it (get a real URL)
 

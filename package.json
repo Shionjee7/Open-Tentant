@@ -2,7 +2,7 @@
   "name": "opentenant",
   "version": "0.1.0",
   "private": true,
-  "description": "Open-source property management software for landlords — listings, applications, screening, leases, rent collection, maintenance, and accounting. Free and self-hosted.",
+  "description": "Open-source property management software for landlords \u2014 listings, applications, screening, leases, rent collection, maintenance, and accounting. Free and self-hosted.",
   "license": "MIT",
   "engines": {
     "node": ">=22.13.0"
@@ -13,7 +13,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "esign": "node scripts/esign.mjs"
   },
   "dependencies": {
     "next": "^15.4.6",

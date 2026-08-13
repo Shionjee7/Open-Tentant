@@ -41,6 +41,7 @@ export const ALL_GROUPS: NavGroup[] = [
       { href: "/applications", label: "Applications", icon: "✎", hint: "People applying to rent from you" },
       { href: "/leases", label: "Leases", icon: "§", hint: "Write, send, and sign the lease" },
       { href: "/documents", label: "Documents", icon: "✍︎", hint: "Leases and notices, and their signing status" },
+      { href: "/signing-app", label: "Signing app", icon: "✒︎", hint: "OpenSign, for signing anything that isn't a lease" },
       { href: "/condition-reports", label: "Condition reports", icon: "☑︎", hint: "Move-in and move-out walkthroughs" },
     ],
   },

@@ -27,7 +27,9 @@ codebase.
 
 | Project | License | How OpenTenant uses it |
 |---|---|---|
-| [OpenSign](https://github.com/OpenSignLabs/OpenSign) | AGPL-3.0 | Lease e-signatures — you run your own instance; the app links to it and optionally calls its REST API |
+| [OpenSign](https://github.com/OpenSignLabs/OpenSign) | AGPL-3.0 | Optional signing app — `npm run esign` pulls the official images and runs it as sibling containers; OpenTenant frames it and optionally calls its REST API |
+| [MongoDB Community](https://github.com/mongodb/mongo) | SSPL-1.0 | OpenSign's database, started with it by the same command |
+| [Caddy](https://github.com/caddyserver/caddy) | Apache-2.0 | Puts the OpenSign app and its API on one origin so it can be framed |
 | [Documenso](https://github.com/documenso/documenso) | AGPL-3.0 | Alternative e-signature provider |
 | [DocuSeal](https://github.com/docusealco/docuseal) | AGPL-3.0 | Alternative e-signature provider |
 | [Nominatim / OpenStreetMap](https://nominatim.org) | Data: ODbL | Address autocomplete |
@@ -44,6 +46,22 @@ and runs as its own process. So OpenTenant stays MIT and can be published freely
 modifying it, you have nothing further to do. If you *modify* OpenSign and let others use
 it over a network, AGPL §13 requires you to offer your modified OpenSign source to those
 users. That obligation attaches to your OpenSign deployment, not to OpenTenant.
+
+**On bundling it.** `npm run esign` and the `esign` Docker Compose profile do not
+redistribute OpenSign — they name official images that Docker pulls from the registry at
+run time, the same as typing `docker run` yourself. This repository contains a compose
+file and a Caddy config, not OpenSign's code. Naming a program in a config file is not
+distributing it, so MIT publication is unaffected.
+
+### MongoDB and the SSPL
+
+The bundled signing app needs MongoDB, which is licensed under the SSPL — not an
+OSI-approved open source license. Two things make that a non-issue here. First, the
+SSPL's condition only triggers if you *offer MongoDB itself as a service* to third
+parties; running it as the private database of your own application does not. Second,
+OpenTenant neither includes nor redistributes MongoDB — Docker pulls the official image
+when you ask for the signing app, and never otherwise. If you would rather not run it at
+all, don't: leases are signed by OpenTenant itself, with no MongoDB anywhere.
 
 ### OpenStreetMap attribution (required)
 
@@ -62,10 +80,11 @@ own Nominatim or Photon instance and set `GEOCODER_URL`.
 
 Everything OpenTenant does works without paying anyone:
 
-- **OpenSign's REST API is a paid feature.** OpenTenant therefore defaults to the free
-  path — it generates the lease, you upload it to your own free self-hosted OpenSign and
-  send it, then paste the signing link back. The API integration exists and switches on
-  automatically if you happen to have a token, but nothing depends on it.
+- **E-signatures cost nothing.** OpenTenant collects lease signatures itself —
+  unlimited, with a full audit trail — so no signing service is required at all.
+  OpenSign's REST API is a paid feature; the bundled OpenSign app is the free
+  self-hosted build, used through its own interface, and the API integration only
+  switches on if you happen to have a token.
 - **Bank connection aggregators charge per account.** OpenTenant imports statements
   instead, which every bank exports for free.
 - **Screening bureaus charge per report**, and the applicant pays them directly.

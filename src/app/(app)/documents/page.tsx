@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { listDocuments, listLeases, listProperties } from "@/lib/data";
 import { getSetting } from "@/lib/data";
 import { createDocument, setDocumentStatus } from "@/lib/actions";
@@ -27,12 +28,19 @@ export default async function DocumentsPage() {
       />
 
       <div className="card mb-6 border-brand-100 bg-brand-50/60 p-4 text-sm">
-        <p className="font-semibold text-ink-900">E-signatures, without DocuSign fees</p>
+        <p className="font-semibold text-ink-900">E-signatures, without per-document fees</p>
         <p className="mt-1 text-ink-700">
-          Self-host an open-source signing tool and paste each document&apos;s signing link here:{" "}
-          <a href="https://documenso.com" target="_blank" className="text-brand-600 hover:underline">Documenso</a>,{" "}
-          <a href="https://www.docuseal.com" target="_blank" className="text-brand-600 hover:underline">DocuSeal</a>, or{" "}
-          <a href="https://www.opensignlabs.com" target="_blank" className="text-brand-600 hover:underline">OpenSign</a>.
+          Leases are signed inside OpenTenant — open a lease and press <em>Send for signature</em>.
+          For anything that isn&apos;t a lease, the{" "}
+          <Link href="/signing-app" className="text-brand-600 hover:underline">signing app</Link>{" "}
+          runs{" "}
+          <a href="https://www.opensignlabs.com" target="_blank" className="text-brand-600 hover:underline">
+            OpenSign
+          </a>{" "}
+          alongside this one. You can also paste a signing link from{" "}
+          <a href="https://documenso.com" target="_blank" className="text-brand-600 hover:underline">Documenso</a>{" "}
+          or{" "}
+          <a href="https://www.docuseal.com" target="_blank" className="text-brand-600 hover:underline">DocuSeal</a>.
           {esignBase && (
             <>
               {" "}Your configured instance:{" "}

@@ -1,3 +1,11 @@
+# OpenTenant, with optional bundled e-signing.
+#
+#   docker compose up -d                       just OpenTenant
+#   docker compose --profile esign up -d       OpenTenant + OpenSign
+#
+# Signing works either way — OpenTenant collects signatures itself. The esign
+# profile is for landlords who want OpenSign's document editor alongside it,
+# reachable from Documents → Signing app without leaving the browser tab.
 services:
   opentenant:
     build: .
@@ -11,4 +19,80 @@ services:
       # Set these before exposing the app to the internet.
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - PB_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD:-opentenant-local-dev}
+      - APP_URL=${APP_URL:-http://localhost:3000}
+      # Told about OpenSign only when the esign profile is up; the app hides
+      # the signing-app page otherwise.
+      - OPENSIGN_BUNDLED=${OPENSIGN_BUNDLED:-}
+      - OPENSIGN_APP_URL=${OPENSIGN_APP_URL:-}
     restart: unless-stopped
+
+  # --- OpenSign (optional) ---------------------------------------------------
+  # AGPL-3.0, run as its own service over the network — see NOTICE.md.
+  opensign-db:
+    image: mongo:7
+    profiles: ["esign"]
+    volumes:
+      - opensign-db:/data/db
+    restart: unless-stopped
+
+  opensign-server:
+    image: opensign/opensignserver:main
+    profiles: ["esign"]
+    depends_on:
+      - opensign-db
+    volumes:
+      - opensign-files:/usr/src/app/files
+    environment:
+      - NODE_ENV=production
+      # Fixed, not a secret: the published client image bakes this identifier
+      # in at build time and only injects REACT_APP_SERVERURL at runtime, so
+      # the server has to answer to the same name or every call is rejected.
+      - APP_ID=opensign
+      - appName=OpenTenant Signing
+      # Full read/write access to every document, so there is deliberately no
+      # default. `npm run esign` generates one.
+      - MASTER_KEY=${OPENSIGN_MASTER_KEY:?run "npm run esign" to generate one, or set OPENSIGN_MASTER_KEY in .env}
+      - MONGODB_URI=mongodb://opensign-db:27017/opensign
+      - PARSE_MOUNT=/app
+      - SERVER_URL=http://opensign-server:8080/app
+      - PUBLIC_URL=${OPENSIGN_APP_URL:-http://localhost:3001}
+      # Keeps documents on this machine instead of an S3 bucket you'd pay for.
+      - USE_LOCAL=TRUE
+      # Reuses the mail account you already set up for OpenTenant.
+      - SMTP_ENABLE=${SMTP_HOST:+true}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER_EMAIL=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASSWORD:-}
+    restart: unless-stopped
+
+  opensign-client:
+    image: opensign/opensign:main
+    profiles: ["esign"]
+    depends_on:
+      - opensign-server
+    environment:
+      - PUBLIC_URL=${OPENSIGN_APP_URL:-http://localhost:3001}
+      - REACT_APP_SERVERURL=${OPENSIGN_APP_URL:-http://localhost:3001}/api/app
+      - GENERATE_SOURCEMAP=false
+    restart: unless-stopped
+
+  # Puts the OpenSign client and its API on one origin, so the app can be
+  # embedded in a page rather than opened as a separate site.
+  opensign-proxy:
+    image: caddy:2
+    profiles: ["esign"]
+    depends_on:
+      - opensign-client
+      - opensign-server
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./docker/opensign.Caddyfile:/etc/caddy/Caddyfile:ro
+      - opensign-caddy:/data
+    restart: unless-stopped
+
+volumes:
+  opensign-db:
+  opensign-files:
+  opensign-caddy:

@@ -1,0 +1,19 @@
+# One origin for OpenSign: the app at /, its API under /api.
+#
+# `frame_ancestors` lets OpenTenant show it inside a page, so signing lives in
+# the same tab as everything else. Only this app's own origin may frame it —
+# nobody else's site can.
+:3001 {
+	header {
+		-X-Frame-Options
+		Content-Security-Policy "frame-ancestors 'self' {$APP_URL:http://localhost:3000}"
+	}
+
+	handle_path /api/* {
+		reverse_proxy opensign-server:8080
+	}
+
+	handle {
+		reverse_proxy opensign-client:3000
+	}
+}
