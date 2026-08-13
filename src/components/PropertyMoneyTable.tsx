@@ -40,14 +40,35 @@ export default function PropertyMoneyTable({ rows }: { rows: PropertyOutlook[] }
     { monthlyRent: 0, monthlyExpenseRate: 0, monthlyNet: 0, yearlyNet: 0, netThisYear: 0, fiveYear: 0 }
   );
 
-  const Figure = ({ label, value, tone }: { label: string; value: string; tone?: "in" | "out" }) => (
-    <div className="flex justify-between gap-2">
-      <dt className="text-ink-500">{label}</dt>
-      <dd className={tone === "in" ? "text-emerald-600" : tone === "out" ? "text-rose-600" : ""}>
-        {value}
-      </dd>
-    </div>
-  );
+  /**
+   * Colour marks money moving, so zero stays black. A column of red $0s reads
+   * as five things going wrong when nothing has been recorded yet.
+   */
+  const Figure = ({
+    label,
+    value,
+    amount,
+    tone,
+  }: {
+    label: string;
+    value: string;
+    amount?: number;
+    tone?: "in" | "out";
+  }) => {
+    const live = amount === undefined || amount !== 0;
+    return (
+      <div className="flex justify-between gap-2">
+        <dt className="text-ink-500">{label}</dt>
+        <dd
+          className={
+            !live ? "" : tone === "in" ? "text-emerald-600" : tone === "out" ? "text-rose-600" : ""
+          }
+        >
+          {value}
+        </dd>
+      </div>
+    );
+  };
 
   return (
     <div className="p-4 sm:p-5">
@@ -83,8 +104,8 @@ export default function PropertyMoneyTable({ rows }: { rows: PropertyOutlook[] }
               className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 text-sm"
               style={{ fontVariantNumeric: "tabular-nums" }}
             >
-              <Figure label="Rent a month" value={money(outlook.monthlyRent)} tone="in" />
-              <Figure label="Costs a month" value={money(outlook.monthlyExpenseRate)} tone="out" />
+              <Figure label="Rent a month" value={money(outlook.monthlyRent)} amount={outlook.monthlyRent} tone="in" />
+              <Figure label="Costs a month" value={money(outlook.monthlyExpenseRate)} amount={outlook.monthlyExpenseRate} tone="out" />
               <Figure label="Net a year" value={money(outlook.yearlyNet)} />
               <Figure label="Kept this year" value={money(outlook.netThisYear)} />
               <div className="flex justify-between gap-2 border-t border-slate-100 pt-1.5 font-medium">
@@ -109,8 +130,8 @@ export default function PropertyMoneyTable({ rows }: { rows: PropertyOutlook[] }
             </dd>
           </div>
           <div className="mt-2 grid gap-x-6 gap-y-1 border-t border-slate-200 pt-2 sm:grid-cols-2">
-            <Figure label="Rent a month" value={money(totals.monthlyRent)} tone="in" />
-            <Figure label="Costs a month" value={money(totals.monthlyExpenseRate)} tone="out" />
+            <Figure label="Rent a month" value={money(totals.monthlyRent)} amount={totals.monthlyRent} tone="in" />
+            <Figure label="Costs a month" value={money(totals.monthlyExpenseRate)} amount={totals.monthlyExpenseRate} tone="out" />
             <Figure label="Net a year" value={money(totals.yearlyNet)} />
             <Figure label="Net over 5 years" value={money(totals.fiveYear)} />
           </div>

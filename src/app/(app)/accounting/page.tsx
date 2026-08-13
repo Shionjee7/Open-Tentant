@@ -184,11 +184,11 @@ export default async function AccountingPage() {
                   </div>
                   <div className="flex justify-between gap-2">
                     <dt className="text-ink-500">Deposits in</dt>
-                    <dd className="text-emerald-600">{money(row.depositsIn)}</dd>
+                    <dd className={row.depositsIn > 0 ? "text-emerald-600" : ""}>{money(row.depositsIn)}</dd>
                   </div>
                   <div className="flex justify-between gap-2">
                     <dt className="text-ink-500">Spent</dt>
-                    <dd className="text-rose-600">{money(row.expensesOut)}</dd>
+                    <dd className={row.expensesOut > 0 ? "text-rose-600" : ""}>{money(row.expensesOut)}</dd>
                   </div>
                 </dl>
               </li>
