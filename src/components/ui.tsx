@@ -107,6 +107,57 @@ export function EmptyState({
   );
 }
 
+/**
+ * The "you haven't started yet" screen.
+ *
+ * A page with no data shouldn't render its whole skeleton full of zeros — six
+ * $0 tiles, an empty chart, and three empty tables tell a first-time landlord
+ * nothing except that the software is complicated. Until there is something to
+ * show, show the two or three steps that produce it instead.
+ */
+export function StartHere({
+  title,
+  message,
+  steps,
+}: {
+  title: string;
+  message: string;
+  steps: { href: string; label: string; detail: string; done?: boolean }[];
+}) {
+  return (
+    <div className="card mx-auto max-w-2xl px-6 py-8">
+      <h2 className="text-lg font-semibold text-ink-900">{title}</h2>
+      <p className="mt-1 text-sm text-ink-700">{message}</p>
+      <ol className="mt-5 space-y-3">
+        {steps.map((step, index) => (
+          <li key={step.href}>
+            <Link
+              href={step.href}
+              className={`flex items-start gap-3 rounded-xl border px-4 py-3 transition ${
+                step.done
+                  ? "border-emerald-200 bg-emerald-50/60"
+                  : "border-slate-200 hover:border-brand-300 hover:bg-brand-50/40"
+              }`}
+            >
+              <span
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
+                  step.done ? "bg-emerald-600 text-white" : "bg-slate-100 text-ink-700"
+                }`}
+              >
+                {step.done ? "✓" : index + 1}
+              </span>
+              <span className="min-w-0">
+                <span className="block font-medium text-ink-900">{step.label}</span>
+                <span className="block text-sm text-ink-500">{step.detail}</span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 export function BackLink({ href, label }: { href: string; label: string }) {
   return (
     <Link href={href} className="mb-4 inline-block text-sm text-brand-600 hover:underline">

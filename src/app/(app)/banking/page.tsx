@@ -70,6 +70,9 @@ export default async function BankingPage({
   const candidates = await openPayments();
 
   const unmatchedTotal = unmatched.reduce((sum, d) => sum + d.amount, 0);
+  // Nothing set up and nothing imported: the tiles would all read zero and the
+  // review list would be empty, so lead with the two forms that change that.
+  const started = accounts.length > 0 || matched.length + unmatched.length + ignored.length > 0;
 
   return (
     <>
@@ -105,12 +108,22 @@ export default async function BankingPage({
         </div>
       )}
 
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Accounts" value={accounts.length} />
-        <StatCard label="Needs review" value={unmatched.length} tone={unmatched.length > 0 ? "bad" : "default"} />
-        <StatCard label="Unassigned total" value={moneyExact(unmatchedTotal)} />
-        <StatCard label="Assigned" value={matched.length} tone="good" />
-      </div>
+      {started && (
+        <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <StatCard label="Accounts" value={accounts.length} />
+          <StatCard label="Needs review" value={unmatched.length} tone={unmatched.length > 0 ? "bad" : "default"} />
+          <StatCard label="Unassigned total" value={moneyExact(unmatchedTotal)} />
+          <StatCard label="Assigned" value={matched.length} tone="good" />
+        </div>
+      )}
+
+      {!started && (
+        <div className="card mb-6 border-brand-100 bg-brand-50/60 px-5 py-4 text-sm text-ink-700">
+          <strong className="text-ink-900">Two things to do here.</strong> Add the account your rent
+          lands in, then export a statement from your bank and drop it in. Deposits get matched to
+          tenants and bills get sorted into expense categories — nothing is counted twice.
+        </div>
+      )}
 
       {alreadyRecorded.length > 0 && (
         <section className="card mb-6 border-amber-200">
@@ -239,6 +252,7 @@ export default async function BankingPage({
       )}
 
       {/* ---------------- Deposits needing review ---------------- */}
+      {started && (
       <section className="card mb-6">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <div>
@@ -345,6 +359,7 @@ export default async function BankingPage({
           </ul>
         )}
       </section>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-2">
         {/* ---------------- Import ---------------- */}

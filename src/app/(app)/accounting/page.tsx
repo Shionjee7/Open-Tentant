@@ -10,7 +10,7 @@ import {
 } from "@/lib/data";
 import { createTransaction } from "@/lib/actions";
 import { money, moneyExact, monthLabel, shortDate, titleCase } from "@/lib/format";
-import { Badge, PageHeader, StatCard } from "@/components/ui";
+import { Badge, PageHeader, StartHere, StatCard } from "@/components/ui";
 import IncomeExpenseChart from "@/components/IncomeExpenseChart";
 import PropertyMoneyTable from "@/components/PropertyMoneyTable";
 
@@ -28,6 +28,45 @@ export default async function AccountingPage() {
   const balances = await accountBalances();
   const today = new Date().toISOString().slice(0, 10);
 
+  // Nothing has happened yet, so there is nothing to account for. Showing the
+  // full page here means six $0 tiles, an empty chart, and three empty tables.
+  const hasBooks = txns.length > 0;
+  // A year of rent and bills is hundreds of rows, and nobody scrolls them. Show
+  // the recent ones; the partner report has the full ledger.
+  const RECENT = 15;
+  const recentTxns = txns.slice(0, RECENT);
+  if (!hasBooks && summary.houses === 0) {
+    return (
+      <>
+        <PageHeader
+          title="Accounting"
+          subtitle="Rent in, costs out, and what's left — once there's something to count."
+        />
+        <StartHere
+          title="Your books start with a property"
+          message="Rent you approve books itself as income, and bank statements fill in the costs. Three steps and this page fills itself in."
+          steps={[
+            {
+              href: "/properties/new",
+              label: "Add a property",
+              detail: "The house or apartment you rent out — rooms too, if you let them separately.",
+            },
+            {
+              href: "/payments/new",
+              label: "Schedule the rent",
+              detail: "Set it once for the year, and every month tracks itself.",
+            },
+            {
+              href: "/banking",
+              label: "Import a bank statement",
+              detail: "Deposits match to tenants; bills sort themselves into expense categories.",
+            },
+          ]}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader
@@ -38,7 +77,11 @@ export default async function AccountingPage() {
 
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">
         <StatCard label="Total income" value={money(totals.income)} tone="good" />
-        <StatCard label="Total expenses" value={money(totals.expenses)} tone="bad" />
+        <StatCard
+          label="Total expenses"
+          value={money(totals.expenses)}
+          tone={totals.expenses > 0 ? "bad" : "default"}
+        />
         <StatCard
           label="Net profit"
           value={money(totals.income - totals.expenses)}
@@ -104,54 +147,63 @@ export default async function AccountingPage() {
               minus what its property spent.
             </p>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[620px]">
-              <thead>
-                <tr>
-                  <th className="th">Account</th>
-                  <th className="th">Property</th>
-                  <th className="th text-right">Starting</th>
-                  <th className="th text-right">Deposits in</th>
-                  <th className="th text-right">Spent</th>
-                  <th className="th text-right">Balance now</th>
-                </tr>
-              </thead>
-              <tbody style={{ fontVariantNumeric: "tabular-nums" }}>
-                {balances.map((row) => (
-                  <tr key={row.account.id} className="table-row">
-                    <td className="td">
-                      <span className="font-medium">{row.account.name}</span>
-                      {row.account.last4 && (
-                        <span className="text-ink-500"> ····{row.account.last4}</span>
-                      )}
-                      {!row.known && (
-                        <div className="text-xs text-amber-700">
-                          No starting balance set — this is movement only
-                        </div>
-                      )}
-                    </td>
-                    <td className="td">{row.account.property_name ?? "—"}</td>
-                    <td className="td text-right">
-                      {row.known ? money(row.account.opening_balance || 0) : "—"}
-                    </td>
-                    <td className="td text-right text-emerald-600">{money(row.depositsIn)}</td>
-                    <td className="td text-right text-rose-600">{money(row.expensesOut)}</td>
-                    <td className="td text-right font-semibold">{money(row.balance)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-slate-200 font-semibold">
-                  <td className="td" colSpan={5}>
-                    Across all accounts
-                  </td>
-                  <td className="td text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
-                    {money(balances.reduce((total, row) => total + row.balance, 0))}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+          {/* One layout at every width. A table here would push "balance now" —
+              the only column anyone opens this for — off the side of a phone. */}
+          <ul className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-3">
+            {balances.map((row) => (
+              <li key={row.account.id} className="rounded-xl border border-slate-200 p-4">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="truncate font-medium">
+                    {row.account.name}
+                    {row.account.last4 && (
+                      <span className="text-ink-500"> ····{row.account.last4}</span>
+                    )}
+                  </span>
+                  <span
+                    className="shrink-0 text-lg font-bold"
+                    style={{ fontVariantNumeric: "tabular-nums" }}
+                  >
+                    {money(row.balance)}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-xs text-ink-500">
+                  {row.account.property_name ?? "All properties"}
+                </div>
+                {!row.known && (
+                  <div className="mt-1 text-xs text-amber-700">
+                    No starting balance set — this is movement only
+                  </div>
+                )}
+                <dl
+                  className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 text-sm"
+                  style={{ fontVariantNumeric: "tabular-nums" }}
+                >
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-ink-500">Starting balance</dt>
+                    <dd>{row.known ? money(row.account.opening_balance || 0) : "—"}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-ink-500">Deposits in</dt>
+                    <dd className="text-emerald-600">{money(row.depositsIn)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-ink-500">Spent</dt>
+                    <dd className="text-rose-600">{money(row.expensesOut)}</dd>
+                  </div>
+                </dl>
+              </li>
+            ))}
+          </ul>
+
+          {balances.length > 1 && (
+            <div className="mx-4 mb-4 flex items-baseline justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 font-semibold sm:mx-5 sm:mb-5">
+              <span>Across all accounts</span>
+              <span className="text-lg" style={{ fontVariantNumeric: "tabular-nums" }}>
+                {money(balances.reduce((total, row) => total + row.balance, 0))}
+              </span>
+            </div>
+          )}
+
           <p className="border-t border-slate-100 px-5 py-3 text-xs text-ink-500">
             Set each account&apos;s starting balance under{" "}
             <Link href="/banking" className="text-brand-600 hover:underline">
@@ -162,6 +214,7 @@ export default async function AccountingPage() {
         </section>
       )}
 
+      {hasBooks && (
       <section className="card mb-6 p-5">
         <h2 className="font-semibold">Where you stand</h2>
         <p className="mt-1 text-sm text-ink-700">
@@ -227,16 +280,18 @@ export default async function AccountingPage() {
           </>
         )}
       </section>
+      )}
 
+      {/* An axis with no bars under it isn't a chart, so it waits for data. */}
       <div className="mb-6 grid gap-6 lg:grid-cols-[1fr_320px]">
         <section className="card p-5">
           <h2 className="mb-3 font-semibold">Income vs expenses — last 6 months</h2>
-          {monthly.length === 0 ? (
-            <p className="py-8 text-center text-sm text-ink-500">
-              No transactions yet — approve a payment or add an expense to see the chart.
-            </p>
-          ) : (
+          {hasBooks ? (
             <IncomeExpenseChart data={monthly} />
+          ) : (
+            <p className="py-8 text-center text-sm text-ink-500">
+              Approve a rent payment or add an expense and the last six months appear here.
+            </p>
           )}
         </section>
 
@@ -269,7 +324,16 @@ export default async function AccountingPage() {
 
       <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
         <section className="card overflow-x-auto">
-          <div className="border-b border-slate-100 px-4 py-3 font-semibold">Transactions</div>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 px-4 py-3">
+            <span className="font-semibold">
+              {txns.length > RECENT ? `Latest ${RECENT} transactions` : "Transactions"}
+            </span>
+            {txns.length > RECENT && (
+              <Link href="/reports/portfolio" className="text-sm text-brand-600 hover:underline">
+                All {txns.length} in the report →
+              </Link>
+            )}
+          </div>
           <table className="w-full min-w-[600px]">
             <thead>
               <tr>
@@ -287,7 +351,7 @@ export default async function AccountingPage() {
                   <td className="td py-8 text-center text-ink-500" colSpan={6}>No transactions yet.</td>
                 </tr>
               ) : (
-                txns.map((t) => (
+                recentTxns.map((t) => (
                   <tr key={t.id} className="table-row">
                     <td className="td">{shortDate(t.date)}</td>
                     <td className="td">{t.property_name ?? "—"}</td>
