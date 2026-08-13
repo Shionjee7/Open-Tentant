@@ -147,7 +147,8 @@ async function syncSetupRooms(
   propertyId: Id,
   byRoom: boolean,
   desiredCount: number,
-  roomRent: number
+  roomRent: number,
+  roomDeposit: number
 ) {
   const rooms = await client
     .collection("units")
@@ -167,7 +168,7 @@ async function syncSetupRooms(
         property: propertyId,
         name: `Room ${index + 1}`,
         rent: roomRent,
-        deposit: roomRent,
+        deposit: roomDeposit,
         status: "vacant",
         listed: true,
       })
@@ -184,7 +185,7 @@ async function syncSetupRooms(
   await Promise.all(
     rooms.slice(0, count).map((room) =>
       isUntouchedSetupRoom(room)
-        ? client.collection("units").update(room.id, { rent: roomRent, deposit: roomRent })
+        ? client.collection("units").update(room.id, { rent: roomRent, deposit: roomDeposit })
         : Promise.resolve()
     )
   );
@@ -209,7 +210,8 @@ export async function autosaveProperty(form: FormData) {
       property.id,
       fields.rental_type === "by_room",
       n(form, "room_count"),
-      n(form, "room_rent")
+      n(form, "room_rent"),
+      n(form, "room_deposit")
     );
   }
 
@@ -288,12 +290,13 @@ export async function createProperty(form: FormData) {
   if (byRoom) {
     const rooms = Math.max(0, Math.min(20, n(form, "room_count")));
     const roomRent = n(form, "room_rent");
+    const roomDeposit = n(form, "room_deposit");
     for (let i = 0; i < rooms; i++) {
       await client.collection("units").create({
         property: property.id,
         name: `Room ${i + 1}`,
         rent: roomRent,
-        deposit: roomRent,
+        deposit: roomDeposit,
         status: "vacant",
         listed: true,
       });

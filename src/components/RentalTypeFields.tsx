@@ -69,7 +69,7 @@ export default function RentalTypeFields({
               Manage each room&apos;s rent, deposit, and tenant on the property page below.
             </p>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div>
                 <label className="label" htmlFor="property-room-count">How many rooms?</label>
                 <input id="property-room-count" name="room_count" type="number" step="1" min="1" max="20" defaultValue="4" className="input" />
@@ -79,6 +79,11 @@ export default function RentalTypeFields({
                 <label className="label" htmlFor="property-room-rent">Rent per room ($/mo)</label>
                 <input id="property-room-rent" name="room_rent" type="number" step="1" min="0" className="input" placeholder="750" />
                 <p className="mt-1 text-xs text-ink-500">Set once now, adjust per room later.</p>
+              </div>
+              <div>
+                <label className="label" htmlFor="property-room-deposit">Deposit per room ($)</label>
+                <input id="property-room-deposit" name="room_deposit" type="number" step="1" min="0" className="input" placeholder="750" />
+                <p className="mt-1 text-xs text-ink-500">Each room starts with this deposit.</p>
               </div>
             </div>
           )}
