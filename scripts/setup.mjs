@@ -3,6 +3,7 @@
  * One command to go from a fresh clone to a running app:
  *
  *   npm run setup
+ *   npm run setup:all   # also starts the bundled OpenSign service
  *
  * Checks the Node version, installs dependencies if needed, builds, and starts
  * the server. Safe to re-run — steps already done are skipped.
@@ -85,7 +86,13 @@ if (!(await waitUntilHealthy())) {
 }
 console.log(`${green("✓")} Database ready`);
 
-// --- 5. Start the app ------------------------------------------------------
+// --- 5. Optional signing app ----------------------------------------------
+if (process.argv.includes("--esign")) {
+  step("Starting OpenSign (Docker is required)…");
+  run("node scripts/esign.mjs");
+}
+
+// --- 6. Start the app ------------------------------------------------------
 const port = process.env.PORT || "3000";
 const gated = Boolean(process.env.ADMIN_PASSWORD?.trim());
 

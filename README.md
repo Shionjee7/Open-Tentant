@@ -66,6 +66,17 @@ That installs dependencies, builds, starts the database, and serves the app. Ope
 http://localhost:3000 and click **Load demo data** to explore every module with sample records,
 or add your first property and start clean.
 
+To install and start everything, including the embedded OpenSign service for
+non-lease documents, install and open Docker Desktop first, then run:
+
+```bash
+npm run setup:all
+```
+
+This runs the normal setup and starts OpenSign on port 3001. OpenSign appears
+inside OpenTenant under **Signing app**. Docker is only needed for OpenSign;
+OpenTenant and its PocketBase database work without it.
+
 For day-to-day development, run `npm run pb` in one terminal and `npm run dev` in another.
 Everything lives in `data/pb_data/` — back up that folder and you've backed up everything. The
 database console is at http://127.0.0.1:8090/_/.

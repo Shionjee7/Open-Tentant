@@ -9,6 +9,7 @@
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
+    "setup:all": "node scripts/setup.mjs --esign",
     "pb": "node scripts/pocketbase.mjs",
     "dev": "next dev",
     "build": "next build",
