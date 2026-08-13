@@ -240,6 +240,9 @@ export type BankAccount = {
   kind: "bank" | "zelle" | "cashapp" | "venmo" | "paypal" | "other";
   property: Id | "";
   notes: string;
+  /** What the account held on `balance_date` — the app carries it forward. */
+  opening_balance: number;
+  balance_date: string;
   created: string;
   property_name?: string;
 };

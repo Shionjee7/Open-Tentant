@@ -1144,6 +1144,24 @@ export async function createBankAccount(form: FormData) {
     kind: s(form, "kind") || "bank",
     property: rel(form, "property_id"),
     notes: s(form, "notes"),
+    opening_balance: n(form, "opening_balance"),
+    balance_date: s(form, "balance_date"),
+  });
+  refresh();
+  redirect("/banking");
+}
+
+/**
+ * The balance a statement can't tell us.
+ *
+ * Imports only cover what was uploaded, so the running total needs a starting
+ * point. Set it from a real statement and everything since is carried forward.
+ */
+export async function setAccountBalance(form: FormData) {
+  const client = await pb();
+  await client.collection("bank_accounts").update(s(form, "id"), {
+    opening_balance: n(form, "opening_balance"),
+    balance_date: s(form, "balance_date") || todayIso(),
   });
   refresh();
   redirect("/banking");

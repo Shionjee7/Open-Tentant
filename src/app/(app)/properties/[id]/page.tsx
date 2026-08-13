@@ -1,9 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getProperty, listLeases, listMaintenance, listPeople, listUnits } from "@/lib/data";
+import {
+  getProperty,
+  listLeases,
+  listMaintenance,
+  listPeople,
+  listUnits,
+  propertyOutlooks,
+} from "@/lib/data";
 import { updateProperty } from "@/lib/actions";
 import { money, shortDate, titleCase } from "@/lib/format";
-import { Badge, BackLink, PageHeader } from "@/components/ui";
+import { Badge, BackLink, PageHeader, StatCard } from "@/components/ui";
 import PropertyForm from "@/components/PropertyForm";
 import RoomsPanel from "@/components/RoomsPanel";
 
@@ -23,6 +30,7 @@ export default async function PropertyDetailPage({
   const tenants = (await listPeople("tenant")).filter((p) => p.property === property.id);
   const byRoom = property.rental_type === "by_room";
   const rooms = byRoom ? await listUnits(property.id) : [];
+  const mine = (await propertyOutlooks()).find((o) => o.property.id === property.id);
   // Anyone who could move into a room: current tenants plus approved applicants.
   const roomCandidates = byRoom
     ? (await listPeople()).filter((p) => p.stage === "tenant" || p.stage === "applicant")
@@ -81,6 +89,66 @@ export default async function PropertyDetailPage({
         <div className="mb-6">
           <RoomsPanel property={property} rooms={rooms} candidates={roomCandidates} />
         </div>
+      )}
+
+      {mine && (
+        <section className="card mb-6 p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-semibold">What this property makes</h2>
+            <Link href="/accounting" className="text-sm text-brand-600 hover:underline">
+              Compare with your others →
+            </Link>
+          </div>
+          <p className="mt-1 text-sm text-ink-700">
+            {mine.outlook.activeLeaseCount === 0
+              ? "No active lease here yet, so there's nothing to project from."
+              : `${money(mine.outlook.monthlyRent)} a month in rent, less about ` +
+                `${money(mine.outlook.monthlyExpenseRate)} a month in costs, leaves ` +
+                `${money(mine.outlook.monthlyNet)} a month — ${money(mine.outlook.yearlyNet)} a year.`}
+          </p>
+
+          <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+            <StatCard label="Net per month" value={money(mine.outlook.monthlyNet)}
+              tone={mine.outlook.monthlyNet >= 0 ? "good" : "bad"} />
+            <StatCard label="Net per year" value={money(mine.outlook.yearlyNet)}
+              tone={mine.outlook.yearlyNet >= 0 ? "good" : "bad"} />
+            <StatCard label="Kept this year" value={money(mine.outlook.netThisYear)}
+              hint="what actually landed" />
+            <StatCard label="Kept all time" value={money(mine.outlook.onHand)} />
+          </div>
+
+          {mine.outlook.activeLeaseCount > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[420px]">
+                <thead>
+                  <tr>
+                    <th className="th">If it stays like this</th>
+                    <th className="th text-right">Rent</th>
+                    <th className="th text-right">Costs</th>
+                    <th className="th text-right">Net</th>
+                  </tr>
+                </thead>
+                <tbody style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {mine.outlook.projections.map((row) => (
+                    <tr key={row.years} className="border-t border-slate-100">
+                      <td className="td font-medium">
+                        {row.years} year{row.years === 1 ? "" : "s"}
+                      </td>
+                      <td className="td text-right text-emerald-600">{money(row.rent)}</td>
+                      <td className="td text-right text-rose-600">{money(row.expenses)}</td>
+                      <td className="td text-right font-semibold">{money(row.net)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <p className="mt-2 text-xs text-ink-500">
+            Costs are this property&apos;s own expenses, averaged over the last twelve months.
+            Portfolio-wide expenses aren&apos;t counted here — they&apos;re in Accounting.
+          </p>
+        </section>
       )}
 
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">

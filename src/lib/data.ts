@@ -560,49 +560,41 @@ export async function listBankImports(status?: string): Promise<BankImport[]> {
  * currently-active lease keeps paying its rent, and the last twelve months of
  * expenses repeat. It is a planning aid, not a forecast.
  */
-export async function financialOutlook() {
-  const [transactions, leases, payments] = await Promise.all([
-    fetchAll<Txn>("transactions"),
-    listLeases(),
-    fetchAll<Payment>("payments"),
-  ]);
+export type Outlook = ReturnType<typeof buildOutlook>;
 
-  const income = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const expenses = transactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+/**
+ * The money picture for one set of books.
+ *
+ * Used for the whole portfolio and for a single property, so the two can never
+ * disagree — a house's numbers are the same arithmetic on a smaller pile.
+ */
+function buildOutlook(transactions: Txn[], leases: Lease[], payments: Payment[]) {
+  const sum = (rows: Txn[]) => rows.reduce((total, t) => total + t.amount, 0);
+  const of = (type: "income" | "expense", from = "") =>
+    transactions.filter((t) => t.type === type && (!from || t.date >= from));
 
   const monthStart = startOfMonth();
-  const incomeThisMonth = transactions
-    .filter((t) => t.type === "income" && t.date >= monthStart)
-    .reduce((s, t) => s + t.amount, 0);
-  const expensesThisMonth = transactions
-    .filter((t) => t.type === "expense" && t.date >= monthStart)
-    .reduce((s, t) => s + t.amount, 0);
+  const yearStart = `${new Date().getFullYear()}-01-01`;
 
-  // Twelve-month trailing expense rate, so the projection isn't rent-only.
+  // Twelve-month trailing expense rate, so a projection isn't rent-only. A
+  // roof replacement last March still counts against next year's outlook.
   const yearAgo = new Date();
   yearAgo.setFullYear(yearAgo.getFullYear() - 1);
-  const since = yearAgo.toISOString().slice(0, 10);
-  const trailingExpenses = transactions
-    .filter((t) => t.type === "expense" && t.date >= since)
-    .reduce((s, t) => s + t.amount, 0);
-  const monthlyExpenseRate = trailingExpenses / 12;
+  const trailingFrom = yearAgo.toISOString().slice(0, 10);
+  const monthlyExpenseRate = sum(of("expense", trailingFrom)) / 12;
+
+  const income = sum(of("income"));
+  const expenses = sum(of("expense"));
+  const onHand = income - expenses;
 
   const activeLeases = leases.filter((l) => l.status === "active");
-  const monthlyRent = activeLeases.reduce((s, l) => s + l.rent, 0);
+  const monthlyRent = activeLeases.reduce((total, l) => total + l.rent, 0);
   const monthlyNet = monthlyRent - monthlyExpenseRate;
 
-  const outstanding = payments
-    .filter((p) => p.status !== "paid")
-    .reduce((s, p) => s + p.amount, 0);
-
-  const onHand = income - expenses;
-  const projections = [1, 2, 3, 4, 5].map((years) => ({
-    years,
-    rent: monthlyRent * 12 * years,
-    expenses: monthlyExpenseRate * 12 * years,
-    net: monthlyNet * 12 * years,
-    balance: onHand + monthlyNet * 12 * years,
-  }));
+  const incomeThisMonth = sum(of("income", monthStart));
+  const expensesThisMonth = sum(of("expense", monthStart));
+  const incomeThisYear = sum(of("income", yearStart));
+  const expensesThisYear = sum(of("expense", yearStart));
 
   return {
     income,
@@ -611,13 +603,162 @@ export async function financialOutlook() {
     incomeThisMonth,
     expensesThisMonth,
     netThisMonth: incomeThisMonth - expensesThisMonth,
+    incomeThisYear,
+    expensesThisYear,
+    netThisYear: incomeThisYear - expensesThisYear,
     monthlyRent,
     monthlyExpenseRate,
     monthlyNet,
+    /** What a full year at today's leases and expense rate looks like. */
+    yearlyRent: monthlyRent * 12,
+    yearlyExpenses: monthlyExpenseRate * 12,
+    yearlyNet: monthlyNet * 12,
     activeLeaseCount: activeLeases.length,
-    outstanding,
-    projections,
+    outstanding: payments.filter((p) => p.status !== "paid").reduce((t, p) => t + p.amount, 0),
+    projections: [1, 2, 3, 4, 5].map((years) => ({
+      years,
+      rent: monthlyRent * 12 * years,
+      expenses: monthlyExpenseRate * 12 * years,
+      net: monthlyNet * 12 * years,
+      balance: onHand + monthlyNet * 12 * years,
+    })),
   };
+}
+
+export async function financialOutlook() {
+  const [transactions, leases, payments] = await Promise.all([
+    fetchAll<Txn>("transactions"),
+    listLeases(),
+    fetchAll<Payment>("payments"),
+  ]);
+  return buildOutlook(transactions, leases, payments);
+}
+
+export type PropertyOutlook = {
+  property: Property;
+  outlook: Outlook;
+  /** Rooms, for a by-the-room house. Zero when the whole place is let. */
+  rooms: number;
+  roomsOccupied: number;
+  tenantCount: number;
+};
+
+/**
+ * The same picture, one house at a time.
+ *
+ * A transaction belongs to a property or to nothing; leases and payments reach
+ * a property through their lease. Anything left unassigned is reported
+ * separately rather than spread across houses on a guess — see
+ * `portfolioSummary`.
+ */
+export async function propertyOutlooks(): Promise<PropertyOutlook[]> {
+  const [properties, units, transactions, leases, payments, people] = await Promise.all([
+    listProperties(),
+    fetchAll<Unit>("units"),
+    fetchAll<Txn>("transactions"),
+    listLeases(),
+    fetchAll<Payment>("payments"),
+    fetchAll<Person>("people"),
+  ]);
+
+  const leaseProperty = new Map(leases.map((l) => [l.id, l.property]));
+
+  return properties.map((property) => {
+    const ourLeases = leases.filter((l) => l.property === property.id);
+    const ourRooms = units.filter((u) => u.property === property.id);
+    return {
+      property,
+      outlook: buildOutlook(
+        transactions.filter((t) => t.property === property.id),
+        ourLeases,
+        payments.filter((p) => p.lease && leaseProperty.get(p.lease) === property.id)
+      ),
+      rooms: property.rental_type === "by_room" ? ourRooms.length : 0,
+      roomsOccupied: ourRooms.filter((u) => u.status === "occupied").length,
+      tenantCount: people.filter((p) => p.stage === "tenant" && p.property === property.id).length,
+    };
+  });
+}
+
+/**
+ * Portfolio totals, plus the counts a landlord actually quotes — how many
+ * houses, how many rooms, how many are filled.
+ */
+export async function portfolioSummary() {
+  const [outlooks, portfolio, transactions] = await Promise.all([
+    propertyOutlooks(),
+    financialOutlook(),
+    fetchAll<Txn>("transactions"),
+  ]);
+
+  // Expenses booked portfolio-wide — insurance across every house, software,
+  // an accountant. Real money, but not attributable to one address.
+  const unassigned = transactions
+    .filter((t) => t.type === "expense" && !t.property)
+    .reduce((total, t) => total + t.amount, 0);
+
+  return {
+    portfolio,
+    properties: outlooks,
+    houses: outlooks.length,
+    housesOccupied: outlooks.filter((o) => o.property.status === "occupied").length,
+    byRoomHouses: outlooks.filter((o) => o.property.rental_type === "by_room").length,
+    rooms: outlooks.reduce((total, o) => total + o.rooms, 0),
+    roomsOccupied: outlooks.reduce((total, o) => total + o.roomsOccupied, 0),
+    tenants: outlooks.reduce((total, o) => total + o.tenantCount, 0),
+    unassignedExpenses: unassigned,
+  };
+}
+
+export type AccountBalance = {
+  account: BankAccount;
+  /** Deposits imported since the opening balance date. */
+  depositsIn: number;
+  /** Expenses booked to this account's property since that date. */
+  expensesOut: number;
+  balance: number;
+  /** False when no opening balance is set, so the figure is only a movement. */
+  known: boolean;
+  lastImport: string;
+};
+
+/**
+ * What's in each account.
+ *
+ * A statement import only covers what was uploaded, so it can't know a
+ * balance on its own. Give the app a starting point and it carries it forward:
+ * opening balance, plus everything imported since, minus what the linked
+ * property spent. It's an estimate that reconciles against a real statement.
+ */
+export async function accountBalances(): Promise<AccountBalance[]> {
+  const [accounts, deposits, transactions, properties] = await Promise.all([
+    fetchAll<BankAccount>("bank_accounts"),
+    fetchAll<BankImport>("bank_imports"),
+    fetchAll<Txn>("transactions"),
+    listProperties(),
+  ]);
+  const propertyMap = byId(properties);
+
+  return accounts.map((account) => {
+    const from = account.balance_date || "";
+    const ours = deposits.filter((d) => d.account === account.id && (!from || d.posted_date >= from));
+    const depositsIn = ours.reduce((total, d) => total + Math.abs(d.amount), 0);
+    const expensesOut = account.property
+      ? transactions
+          .filter((t) => t.type === "expense" && t.property === account.property && (!from || t.date >= from))
+          .reduce((total, t) => total + t.amount, 0)
+      : 0;
+    const opening = account.opening_balance || 0;
+
+    return {
+      account: { ...account, property_name: propertyMap.get(account.property)?.name },
+      depositsIn,
+      expensesOut,
+      balance: opening + depositsIn - expensesOut,
+      known: Boolean(account.balance_date),
+      lastImport: ours.map((d) => d.posted_date).sort().at(-1) ?? "",
+    };
+  });
 }
 
 // ---------- Dashboard ----------

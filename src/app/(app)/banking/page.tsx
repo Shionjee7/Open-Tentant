@@ -1,4 +1,5 @@
 import {
+  accountBalances,
   listBankAccounts,
   listBankImports,
   listProperties,
@@ -12,6 +13,7 @@ import {
   ignoreImport,
   importStatement,
   matchImport,
+  setAccountBalance,
   unignoreImport,
 } from "@/lib/actions";
 import { matchScore } from "@/lib/statements";
@@ -36,6 +38,8 @@ export default async function BankingPage({
 }) {
   const { imported, skipped, error, duplicates } = await searchParams;
   const accounts = await listBankAccounts();
+  const balances = await accountBalances();
+  const today = new Date().toISOString().slice(0, 10);
   const properties = await listProperties();
   const unmatched = await listBankImports("unmatched");
   const matched = await listBankImports("matched");
@@ -300,26 +304,69 @@ export default async function BankingPage({
             numbers — the last four digits are enough to tell accounts apart.
           </p>
 
-          {accounts.length > 0 && (
+          {balances.length > 0 && (
             <ul className="mt-4 divide-y divide-slate-100 border-y border-slate-100">
-              {accounts.map((a) => (
-                <li key={a.id} className="flex items-center justify-between gap-3 py-3 text-sm">
-                  <div>
-                    <div className="font-medium">
-                      {a.name}
-                      {a.last4 && <span className="ml-1 text-ink-500">••{a.last4}</span>}
+              {balances.map(({ account: a, balance, known, depositsIn }) => (
+                <li key={a.id} className="py-3 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium">
+                        {a.name}
+                        {a.last4 && <span className="ml-1 text-ink-500">••{a.last4}</span>}
+                      </div>
+                      <div className="text-xs text-ink-500">
+                        {titleCase(a.kind)}
+                        {a.institution ? ` · ${a.institution}` : ""}
+                        {" · "}
+                        {a.property_name ?? "all properties"}
+                      </div>
                     </div>
-                    <div className="text-xs text-ink-500">
-                      {titleCase(a.kind)}
-                      {a.institution ? ` · ${a.institution}` : ""}
-                      {" · "}
-                      {a.property_name ?? "all properties"}
+                    <div className="shrink-0 text-right">
+                      <div className="font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        {moneyExact(balance)}
+                      </div>
+                      <div className="text-[11px] text-ink-500">
+                        {known ? "balance now" : `${moneyExact(depositsIn)} in`}
+                      </div>
                     </div>
                   </div>
-                  <form action={deleteBankAccount}>
-                    <input type="hidden" name="id" value={a.id} />
-                    <button className="btn-secondary btn-sm">Remove</button>
-                  </form>
+
+                  <details className="mt-1.5">
+                    <summary className="cursor-pointer text-xs text-ink-500 hover:text-ink-900">
+                      {known ? "Correct the balance" : "Set the starting balance"}
+                    </summary>
+                    <form action={setAccountBalance} className="mt-2 flex flex-wrap items-end gap-2">
+                      <input type="hidden" name="id" value={a.id} />
+                      <div className="w-28">
+                        <label className="label">Balance</label>
+                        <input
+                          name="opening_balance"
+                          type="number"
+                          step="0.01"
+                          defaultValue={a.opening_balance || ""}
+                          className="input"
+                        />
+                      </div>
+                      <div className="w-40">
+                        <label className="label">As of</label>
+                        <input
+                          name="balance_date"
+                          type="date"
+                          defaultValue={a.balance_date || today}
+                          className="input"
+                        />
+                      </div>
+                      <button className="btn-secondary btn-sm">Save</button>
+                    </form>
+                    <p className="mt-1.5 text-xs text-ink-500">
+                      Copy the closing balance from a statement. Deposits imported after that date
+                      are added, and expenses on this property are subtracted.
+                    </p>
+                    <form action={deleteBankAccount} className="mt-2">
+                      <input type="hidden" name="id" value={a.id} />
+                      <button className="btn-secondary btn-sm">Remove this account</button>
+                    </form>
+                  </details>
                 </li>
               ))}
             </ul>

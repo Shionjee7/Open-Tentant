@@ -1,15 +1,18 @@
+import Link from "next/link";
 import {
-  financialOutlook,
+  accountBalances,
   expensesByCategory,
   listProperties,
   listTransactions,
   monthlyTotals,
+  portfolioSummary,
   totalsByType,
 } from "@/lib/data";
 import { createTransaction } from "@/lib/actions";
 import { money, moneyExact, monthLabel, shortDate, titleCase } from "@/lib/format";
 import { Badge, PageHeader, StatCard } from "@/components/ui";
 import IncomeExpenseChart from "@/components/IncomeExpenseChart";
+import PropertyMoneyTable from "@/components/PropertyMoneyTable";
 
 export const metadata = { title: "Accounting" };
 
@@ -20,7 +23,9 @@ export default async function AccountingPage() {
   const byCategory = await expensesByCategory();
   const maxCat = Math.max(1, ...byCategory.map((c) => c.total));
   const properties = await listProperties();
-  const outlook = await financialOutlook();
+  const summary = await portfolioSummary();
+  const outlook = summary.portfolio;
+  const balances = await accountBalances();
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -39,6 +44,122 @@ export default async function AccountingPage() {
           tone={totals.income - totals.expenses >= 0 ? "good" : "bad"}
         />
       </div>
+
+      {/* What you own */}
+      <section className="card mb-6 p-5">
+        <h2 className="font-semibold">What you own</h2>
+        <div className="mt-3 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <StatCard
+            label="Properties"
+            value={String(summary.houses)}
+            hint={`${summary.housesOccupied} rented`}
+          />
+          <StatCard
+            label={summary.rooms > 0 ? "Rooms" : "By the room"}
+            value={summary.rooms > 0 ? String(summary.rooms) : "—"}
+            hint={
+              summary.rooms > 0
+                ? `${summary.roomsOccupied} filled, across ${summary.byRoomHouses} house${summary.byRoomHouses === 1 ? "" : "s"}`
+                : "no room rentals yet"
+            }
+          />
+          <StatCard label="Tenants" value={String(summary.tenants)} />
+          <StatCard
+            label="Rent per month"
+            value={money(outlook.monthlyRent)}
+            tone="good"
+            hint={`${outlook.activeLeaseCount} active lease${outlook.activeLeaseCount === 1 ? "" : "s"}`}
+          />
+        </div>
+      </section>
+
+      {/* Per property */}
+      <section className="card mb-6">
+        <div className="border-b border-slate-100 px-5 py-4">
+          <h2 className="font-semibold">Each property</h2>
+          <p className="mt-0.5 text-sm text-ink-500">
+            What every house earns after its own costs. <em>Per month</em> and <em>per year</em> are
+            the current run rate — today&apos;s leases, minus that property&apos;s average costs.{" "}
+            <em>Kept this year</em> is what actually landed.
+          </p>
+        </div>
+        <PropertyMoneyTable rows={summary.properties} />
+        {summary.unassignedExpenses > 0 && (
+          <p className="border-t border-slate-100 px-5 py-3 text-xs text-ink-500">
+            {money(summary.unassignedExpenses)} of expenses aren&apos;t tied to a property
+            (portfolio-wide insurance, software, and so on), so they sit outside these rows and are
+            counted in the totals below. Pick a property when adding an expense to see it here.
+          </p>
+        )}
+      </section>
+
+      {/* Money in the bank */}
+      {balances.length > 0 && (
+        <section className="card mb-6">
+          <div className="border-b border-slate-100 px-5 py-4">
+            <h2 className="font-semibold">Money in the bank</h2>
+            <p className="mt-0.5 text-sm text-ink-500">
+              Each account carried forward from the balance you set, plus deposits imported since,
+              minus what its property spent.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[620px]">
+              <thead>
+                <tr>
+                  <th className="th">Account</th>
+                  <th className="th">Property</th>
+                  <th className="th text-right">Starting</th>
+                  <th className="th text-right">Deposits in</th>
+                  <th className="th text-right">Spent</th>
+                  <th className="th text-right">Balance now</th>
+                </tr>
+              </thead>
+              <tbody style={{ fontVariantNumeric: "tabular-nums" }}>
+                {balances.map((row) => (
+                  <tr key={row.account.id} className="table-row">
+                    <td className="td">
+                      <span className="font-medium">{row.account.name}</span>
+                      {row.account.last4 && (
+                        <span className="text-ink-500"> ····{row.account.last4}</span>
+                      )}
+                      {!row.known && (
+                        <div className="text-xs text-amber-700">
+                          No starting balance set — this is movement only
+                        </div>
+                      )}
+                    </td>
+                    <td className="td">{row.account.property_name ?? "—"}</td>
+                    <td className="td text-right">
+                      {row.known ? money(row.account.opening_balance || 0) : "—"}
+                    </td>
+                    <td className="td text-right text-emerald-600">{money(row.depositsIn)}</td>
+                    <td className="td text-right text-rose-600">{money(row.expensesOut)}</td>
+                    <td className="td text-right font-semibold">{money(row.balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-200 font-semibold">
+                  <td className="td" colSpan={5}>
+                    Across all accounts
+                  </td>
+                  <td className="td text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {money(balances.reduce((total, row) => total + row.balance, 0))}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="border-t border-slate-100 px-5 py-3 text-xs text-ink-500">
+            Set each account&apos;s starting balance under{" "}
+            <Link href="/banking" className="text-brand-600 hover:underline">
+              Bank deposits
+            </Link>
+            , then import statements to keep it current.
+          </p>
+        </section>
+      )}
 
       <section className="card mb-6 p-5">
         <h2 className="font-semibold">Where you stand</h2>
