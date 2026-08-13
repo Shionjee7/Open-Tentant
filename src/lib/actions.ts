@@ -1,15 +1,25 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { pb } from "./pb";
 import { MENU_COOKIE } from "./nav";
+import { premisesLabel, renderLease } from "./lease-render";
+import {
+  CONSENT_TEXT,
+  clientIp,
+  signingProgress,
+  signingToken,
+  signingUrl,
+} from "./signing";
 import {
   getLease,
   getPerson,
   getSetting,
+  getSignatureByToken,
   leaseTenantIds,
+  listSignatures,
   listAllUnits,
   listPayments,
   listPeople,
@@ -618,6 +628,260 @@ export async function sendLeaseForSignature(form: FormData) {
   });
   refresh();
   redirect(`/leases/${leaseId}?esign=guided`);
+}
+
+// ---------- Built-in signing ----------
+
+/**
+ * Sends the lease for signature without leaving OpenTenant.
+ *
+ * One row per signer — every tenant with an email address, plus the landlord —
+ * each with its own private link. Nothing is shared between them, so a tenant
+ * can never sign on the landlord's behalf.
+ */
+export async function sendForSigning(form: FormData) {
+  const client = await pb();
+  const leaseId = s(form, "lease_id");
+  const rendered = await renderLease(leaseId);
+  if (!rendered) redirect("/leases");
+
+  const tenantSigners = rendered.tenants.filter((t) => t.email);
+  if (tenantSigners.length === 0) redirect(`/leases/${leaseId}?esign=nosigners`);
+
+  const business = await businessName();
+  const landlordEmail = await landlordInbox();
+  const base = await appUrl();
+  const now = new Date().toISOString();
+
+  // Replacing an earlier round: cancel what's outstanding, keep what's signed.
+  const existing = await listSignatures(leaseId);
+  for (const old of existing.filter((x) => x.status === "pending")) {
+    await client.collection("signatures").update(old.id, { status: "cancelled" });
+  }
+
+  const created: { name: string; email: string; token: string }[] = [];
+
+  for (const tenant of tenantSigners) {
+    const already = existing.find(
+      (x) => x.status === "signed" && x.role === "tenant" && x.person === tenant.id
+    );
+    if (already) continue;
+    const token = signingToken();
+    await client.collection("signatures").create({
+      lease: leaseId,
+      person: tenant.id,
+      role: "tenant",
+      signer_name: `${tenant.first_name} ${tenant.last_name}`.trim(),
+      signer_email: tenant.email,
+      token,
+      status: "pending",
+      sent_at: now,
+    });
+    created.push({ name: tenant.first_name, email: tenant.email, token });
+  }
+
+  // The landlord signs from the lease page, so their row needs no email.
+  const landlordSigned = existing.find((x) => x.status === "signed" && x.role === "landlord");
+  if (!landlordSigned) {
+    await client.collection("signatures").create({
+      lease: leaseId,
+      role: "landlord",
+      signer_name: rendered.landlordName,
+      signer_email: landlordEmail,
+      token: signingToken(),
+      status: "pending",
+      sent_at: now,
+    });
+  }
+
+  await client.collection("leases").update(leaseId, {
+    status: rendered.lease.status === "draft" ? "sent" : rendered.lease.status,
+    esign_provider: "opentenant",
+  });
+
+  const title = `Lease — ${rendered.lease.property_name}${
+    rendered.lease.unit_name ? ` — ${rendered.lease.unit_name}` : ""
+  }`;
+  const documents = await client
+    .collection("documents")
+    .getFullList({ perPage: 50, filter: `lease="${leaseId}" && provider="opentenant"` });
+  if (documents.length === 0) {
+    await client.collection("documents").create({
+      name: title,
+      type: "lease",
+      lease: leaseId,
+      property: rendered.lease.property,
+      status: "sent",
+      provider: "opentenant",
+    });
+  }
+
+  const premises = premisesLabel(rendered);
+  for (const signer of created) {
+    await sendEmailQuietly({
+      to: signer.email,
+      ...templates.signatureRequest(business, signer.name, premises, signingUrl(base, signer.token)),
+    });
+  }
+
+  refresh();
+  redirect(`/leases/${leaseId}?esign=requested`);
+}
+
+/**
+ * Records a signature.
+ *
+ * Everything the audit trail needs is captured here, in one write, at the
+ * moment the signer commits: their typed name, the consent they agreed to,
+ * when, from where, and the hash of the terms they were shown.
+ */
+export async function signDocument(form: FormData) {
+  const client = await pb();
+  const token = s(form, "token");
+  const signature = await getSignatureByToken(token);
+  if (!signature || signature.status !== "pending") redirect(`/sign/${token}`);
+
+  const typedName = s(form, "typed_name");
+  if (!typedName || s(form, "consent") !== "yes" || s(form, "agree") !== "yes") {
+    redirect(`/sign/${token}?notice=incomplete`);
+  }
+
+  const rendered = await renderLease(signature.lease);
+  if (!rendered) redirect(`/sign/${token}`);
+
+  const requestHeaders = await headers();
+  // A drawn signature is optional; anything that isn't a PNG data URL is dropped.
+  const drawn = s(form, "drawn_signature");
+  const drawnSignature = drawn.startsWith("data:image/png;base64,") ? drawn.slice(0, 400000) : "";
+
+  await client.collection("signatures").update(signature.id, {
+    status: "signed",
+    typed_name: typedName,
+    drawn_signature: drawnSignature,
+    consent_text: CONSENT_TEXT,
+    document_hash: rendered.hash,
+    ip: clientIp(requestHeaders),
+    user_agent: (requestHeaders.get("user-agent") ?? "").slice(0, 300),
+    signed_at: new Date().toISOString(),
+  });
+
+  await settleLease(signature.lease);
+  refresh();
+  redirect(`/sign/${token}`);
+}
+
+export async function declineDocument(form: FormData) {
+  const client = await pb();
+  const token = s(form, "token");
+  const signature = await getSignatureByToken(token);
+  if (!signature || signature.status !== "pending") redirect(`/sign/${token}`);
+
+  await client.collection("signatures").update(signature.id, {
+    status: "declined",
+    decline_reason: s(form, "reason").slice(0, 300),
+    signed_at: new Date().toISOString(),
+  });
+
+  const rendered = await renderLease(signature.lease);
+  const inbox = await landlordInbox();
+  if (inbox && rendered) {
+    await sendEmailQuietly({
+      to: inbox,
+      ...templates.signatureDeclined(
+        await businessName(),
+        signature.signer_name,
+        premisesLabel(rendered),
+        s(form, "reason"),
+        `${await appUrl()}/leases/${signature.lease}`
+      ),
+    });
+  }
+
+  refresh();
+  redirect(`/sign/${token}?notice=declined`);
+}
+
+/**
+ * Once everyone has signed, marks the lease signed and mails each party their
+ * completed copy. Idempotent — running it again after the fact changes nothing.
+ */
+async function settleLease(leaseId: Id): Promise<void> {
+  const client = await pb();
+  const signatures = await listSignatures(leaseId);
+  const progress = signingProgress(signatures);
+  if (!progress.complete) return;
+
+  const lease = await getLease(leaseId);
+  if (!lease) return;
+  if (lease.status !== "signed" && lease.status !== "active") {
+    await client.collection("leases").update(leaseId, { status: "signed" });
+  }
+
+  const documents = await client
+    .collection("documents")
+    .getFullList({ perPage: 50, filter: `lease="${leaseId}"` });
+  for (const document of documents.filter((d) => d.status !== "signed")) {
+    await client
+      .collection("documents")
+      .update(document.id, { status: "signed", signed_at: todayIso() });
+  }
+
+  const rendered = await renderLease(leaseId);
+  if (!rendered) return;
+  const business = await businessName();
+  const premises = premisesLabel(rendered);
+  const base = await appUrl();
+
+  for (const signer of signatures.filter((x) => x.status === "signed" && x.signer_email)) {
+    await sendEmailQuietly({
+      to: signer.signer_email,
+      ...templates.signatureComplete(
+        business,
+        signer.typed_name || signer.signer_name,
+        premises,
+        signingUrl(base, signer.token)
+      ),
+    });
+  }
+}
+
+/** Re-sends a signing link to someone who hasn't got to it yet. */
+export async function remindSigner(form: FormData) {
+  const signatureId = s(form, "signature_id");
+  const leaseId = s(form, "lease_id");
+  const signatures = await listSignatures(leaseId);
+  const signature = signatures.find((x) => x.id === signatureId);
+  if (!signature || signature.status !== "pending" || !signature.signer_email) {
+    redirect(`/leases/${leaseId}`);
+  }
+
+  const rendered = await renderLease(leaseId);
+  if (rendered) {
+    await sendEmailQuietly({
+      to: signature.signer_email,
+      ...templates.signatureRequest(
+        await businessName(),
+        signature.signer_name.split(" ")[0] || signature.signer_name,
+        premisesLabel(rendered),
+        signingUrl(await appUrl(), signature.token)
+      ),
+    });
+  }
+  refresh();
+  redirect(`/leases/${leaseId}?esign=reminded`);
+}
+
+/** Withdraws every outstanding request — the links stop working immediately. */
+export async function cancelSigning(form: FormData) {
+  const client = await pb();
+  const leaseId = s(form, "lease_id");
+  for (const signature of await listSignatures(leaseId)) {
+    if (signature.status === "pending") {
+      await client.collection("signatures").update(signature.id, { status: "cancelled" });
+    }
+  }
+  refresh();
+  redirect(`/leases/${leaseId}?esign=cancelled`);
 }
 
 export async function saveSigningLink(form: FormData) {

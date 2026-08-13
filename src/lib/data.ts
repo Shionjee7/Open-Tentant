@@ -12,6 +12,7 @@ import type {
   Payment,
   Person,
   Property,
+  Signature,
   Txn,
   Unit,
 } from "./types";
@@ -480,6 +481,24 @@ export async function listDocuments(): Promise<Doc[]> {
     ...d,
     property_name: d.property ? propertyMap.get(d.property)?.name : undefined,
   }));
+}
+
+// ---------- Signatures ----------
+
+export async function listSignatures(leaseId: Id): Promise<Signature[]> {
+  const all = await fetchAll<Signature>("signatures", { sort: "created" });
+  return all.filter((s) => s.lease === leaseId);
+}
+
+/** All signature rows, for counting outstanding requests across leases. */
+export async function listAllSignatures(): Promise<Signature[]> {
+  return fetchAll<Signature>("signatures", { sort: "created" });
+}
+
+export async function getSignatureByToken(token: string): Promise<Signature | undefined> {
+  if (!token) return undefined;
+  const all = await fetchAll<Signature>("signatures");
+  return all.find((s) => s.token === token);
 }
 
 // ---------- Condition reports ----------

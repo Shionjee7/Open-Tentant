@@ -168,3 +168,16 @@ export async function fetchDocumentStatus(
 export async function openSignAppUrl(): Promise<string> {
   return (await openSignConfig()).appUrl.replace(/\/$/, "");
 }
+
+/**
+ * Whether OpenSign is running alongside this app.
+ *
+ * `docker compose --profile esign up` starts it as a sibling service and sets
+ * OPENSIGN_BUNDLED, so the UI can say "it's right there" instead of asking the
+ * landlord to go and set one up.
+ */
+export async function openSignBundled(): Promise<boolean> {
+  if (process.env.OPENSIGN_BUNDLED?.trim()) return true;
+  const url = await openSignAppUrl();
+  return url.includes("localhost") || url.includes("127.0.0.1");
+}

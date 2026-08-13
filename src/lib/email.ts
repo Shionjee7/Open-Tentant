@@ -340,6 +340,59 @@ export const templates = {
     };
   },
 
+  signatureRequest(businessName: string, signerName: string, premises: string, signUrl: string) {
+    return {
+      subject: `Please sign your lease — ${premises}`,
+      html: shell(
+        businessName,
+        "Your lease is ready to sign",
+        p(`Hi ${escapeHtml(signerName)},`) +
+          p(
+            `Your lease for <strong>${escapeHtml(premises)}</strong> is ready. Open the link below to read it in full and sign it — it takes a minute, and works on a phone.`
+          ) +
+          p("Nothing to print, scan, or install. You'll get a copy of the signed lease by email once everyone has signed.") +
+          p("<strong>This link is private to you</strong> — please don't forward it."),
+        { label: "Read and sign your lease", url: signUrl }
+      ),
+    };
+  },
+
+  signatureComplete(businessName: string, signerName: string, premises: string, signUrl: string) {
+    return {
+      subject: `Signed: your lease for ${premises}`,
+      html: shell(
+        businessName,
+        "Everyone has signed",
+        p(`Hi ${escapeHtml(signerName)},`) +
+          p(
+            `The lease for <strong>${escapeHtml(premises)}</strong> is fully signed. Your copy — including the certificate of completion showing who signed and when — is at the link below.`
+          ) +
+          p("Save a copy for your records; the link stays live for you."),
+        { label: "View your signed lease", url: signUrl }
+      ),
+    };
+  },
+
+  signatureDeclined(
+    businessName: string,
+    signerName: string,
+    premises: string,
+    reason: string,
+    leaseUrl: string
+  ) {
+    return {
+      subject: `${signerName} declined to sign — ${premises}`,
+      html: shell(
+        businessName,
+        "A signer declined",
+        p(`<strong>${escapeHtml(signerName)}</strong> declined to sign the lease for ${escapeHtml(premises)}.`) +
+          (reason ? p(`They said: “${escapeHtml(reason)}”`) : p("They didn't give a reason.")) +
+          p("Nothing was signed. Sort it out with them, then send the lease again."),
+        { label: "Open the lease", url: leaseUrl }
+      ),
+    };
+  },
+
   test(businessName: string) {
     return {
       subject: "OpenTenant test email",

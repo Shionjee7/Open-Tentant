@@ -1,4 +1,4 @@
-import type { Lease, Person, Property, Unit } from "./types";
+import type { Lease, Person, Property, Signature, Unit } from "./types";
 import { moneyExact, shortDate } from "./format";
 
 /**
@@ -62,6 +62,12 @@ export type LeaseDocumentInput = {
   paymentInstructions: string;
   contactEmail: string;
   terms: LeaseTerms;
+  /**
+   * Collected signatures. Signed ones are drawn onto the signature lines and
+   * summarised in a certificate of completion at the end; the document is
+   * otherwise identical, which is what keeps its hash stable.
+   */
+  signatures?: Signature[];
 };
 
 function esc(value: string): string {
@@ -357,18 +363,92 @@ export function buildLeaseDocument(input: LeaseDocumentInput): string {
     )
     .join("");
 
+  const signatures = (input.signatures ?? []).filter((s) => s.status === "signed");
+  const signedBy = (role: "landlord" | "tenant", personId?: string) =>
+    signatures.find((s) =>
+      role === "landlord" ? s.role === "landlord" : s.role === "tenant" && s.person === personId
+    );
+
+  /** Draws a real signature on the line, or leaves the line blank for a pen. */
+  const signatureLine = (signature: Signature | undefined, dataSigner: string): string => {
+    if (!signature) {
+      return `
+        <div class="sig-line" data-signer="${dataSigner}"></div>`;
+    }
+    const mark = signature.drawn_signature
+      ? `<img class="sig-img" src="${esc(signature.drawn_signature)}" alt="" />`
+      : `<span class="sig-typed">${esc(signature.typed_name)}</span>`;
+    return `
+        <div class="sig-line signed" data-signer="${dataSigner}">${mark}</div>`;
+  };
+
+  const signatureDate = (signature: Signature | undefined): string =>
+    signature
+      ? `
+        <div class="sig-line small signed"><span class="sig-date">${esc(
+          shortDate(signature.signed_at.slice(0, 10))
+        )}</span></div>`
+      : `
+        <div class="sig-line small"></div>`;
+
   const signatureBlocks = (tenants.length ? tenants : [null])
     .map((t, i) => {
       const name = t ? `${t.first_name} ${t.last_name}`.trim() : "";
+      const signature = t ? signedBy("tenant", t.id) : undefined;
       return `
       <div class="sig">
-        <div class="sig-line" data-signer="tenant-${i + 1}"></div>
+        ${signatureLine(signature, `tenant-${i + 1}`)}
         <div class="sig-label">Tenant signature${name ? ` — ${esc(name)}` : ""}</div>
-        <div class="sig-line small"></div>
+        ${signatureDate(signature)}
         <div class="sig-label">Date</div>
       </div>`;
     })
     .join("");
+
+  const landlordSignature = signedBy("landlord");
+
+  /**
+   * The certificate of completion — who signed, when, from where, and against
+   * which version of the document. Printed with the lease so the evidence
+   * travels with it.
+   */
+  const certificate = signatures.length
+    ? `
+  <section class="certificate">
+    <h3>Certificate of completion</h3>
+    <p class="cert-intro">
+      This page records how each signature above was collected. Each signer opened a private link sent to their
+      own email address, agreed to sign electronically, and signed the version of this document identified below.
+    </p>
+    <table>
+      <thead>
+        <tr><th style="width:auto">Signer</th><th style="width:auto">Signed</th><th style="width:auto">Details</th></tr>
+      </thead>
+      <tbody>
+        ${signatures
+          .map(
+            (s) => `<tr>
+          <td><strong>${esc(s.typed_name || s.signer_name)}</strong><br />${esc(s.signer_email)}<br />
+            <span class="cert-role">${s.role === "landlord" ? "Landlord" : "Tenant"}</span></td>
+          <td>${esc(new Date(s.signed_at).toUTCString())}</td>
+          <td class="cert-meta">IP ${esc(s.ip || "not recorded")}<br />${esc(
+            (s.user_agent || "").slice(0, 90)
+          )}</td>
+        </tr>`
+          )
+          .join("")}
+      </tbody>
+    </table>
+    <p class="cert-consent"><strong>Consent given by each signer:</strong> “${esc(
+      signatures[0].consent_text
+    )}”</p>
+    <p class="cert-meta">
+      Document fingerprint (SHA-256 of the agreed terms):
+      <code>${esc(signatures[0].document_hash)}</code><br />
+      If the terms above are edited after signing, this fingerprint no longer matches and the change is detectable.
+    </p>
+  </section>`
+    : "";
 
   const title = `Residential Lease Agreement — ${premises}`;
 
@@ -400,6 +480,20 @@ export function buildLeaseDocument(input: LeaseDocumentInput): string {
   .sig-line { border-bottom: 1px solid #333; height: 28px; width: 68%; }
   .sig-line.small { width: 32%; margin-top: 16px; }
   .sig-label { font-size: 9pt; color: #555; margin-top: 3px; }
+  .sig-line.signed { display: flex; align-items: flex-end; height: 40px; }
+  .sig-img { max-height: 38px; max-width: 100%; }
+  .sig-typed {
+    font-family: "Segoe Script", "Brush Script MT", "Snell Roundhand", cursive;
+    font-size: 19pt; line-height: 1; padding-bottom: 2px;
+  }
+  .sig-date { font-size: 10pt; padding-bottom: 4px; }
+  .certificate { margin-top: 34px; page-break-before: always; }
+  .certificate th { width: auto; }
+  .cert-intro { font-size: 10pt; margin: 0 0 10px; }
+  .cert-role { font-size: 8.5pt; color: #666; text-transform: uppercase; letter-spacing: .05em; }
+  .cert-meta { font-size: 8.5pt; color: #555; word-break: break-word; }
+  .cert-meta code { font-size: 8pt; }
+  .cert-consent { font-size: 9.5pt; margin: 12px 0 8px; }
   .notice {
     margin-top: 28px; border-top: 1px solid #ccc; padding-top: 9px;
     font-size: 8.5pt; color: #666; font-family: system-ui, sans-serif;
@@ -413,7 +507,11 @@ export function buildLeaseDocument(input: LeaseDocumentInput): string {
 </head>
 <body>
   <div class="noprint">
-    <strong>Ready to sign.</strong> Print this page or choose “Save as PDF”, then send that file for signature.
+    ${
+      signatures.length
+        ? `<strong>Signed.</strong> The signatures and the certificate of completion are part of this document — print it or choose “Save as PDF” to keep a copy.`
+        : `<strong>Ready to sign.</strong> Send it for signature from the lease page, or print this and sign on paper.`
+    }
   </div>
 
   <h1>Residential Lease Agreement</h1>
@@ -442,14 +540,16 @@ export function buildLeaseDocument(input: LeaseDocumentInput): string {
     <p style="margin:0;font-size:10pt;">By signing below, the parties agree to the terms of this Lease.</p>
 
     <div class="sig">
-      <div class="sig-line" data-signer="landlord"></div>
+      ${signatureLine(landlordSignature, "landlord")}
       <div class="sig-label">Landlord signature — ${esc(landlordName)}</div>
-      <div class="sig-line small"></div>
+      ${signatureDate(landlordSignature)}
       <div class="sig-label">Date</div>
     </div>
 
     ${signatureBlocks}
   </div>
+
+  ${certificate}
 
   <p class="notice">
     Generated by OpenTenant. This is a general template, not legal advice. Landlord-tenant law varies by state and

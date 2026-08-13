@@ -185,6 +185,34 @@ export type Doc = {
   property_name?: string;
 };
 
+/**
+ * One signer's request and, once they sign, the evidence that they did.
+ *
+ * The fields after `status` are what makes an electronic signature hold up:
+ * the signer's own words for their name, the consent they agreed to, when and
+ * from where, and a hash of the exact document they were shown.
+ */
+export type Signature = {
+  id: Id;
+  lease: Id;
+  person: Id | "";
+  role: "landlord" | "tenant";
+  signer_name: string;
+  signer_email: string;
+  token: string;
+  status: "pending" | "signed" | "declined" | "cancelled";
+  typed_name: string;
+  drawn_signature: string;
+  consent_text: string;
+  document_hash: string;
+  ip: string;
+  user_agent: string;
+  sent_at: string;
+  signed_at: string;
+  decline_reason: string;
+  created: string;
+};
+
 export type ConditionItem = {
   area: string;
   condition: "good" | "fair" | "poor" | "";

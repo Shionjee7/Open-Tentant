@@ -35,6 +35,8 @@ export const PUBLIC_PREFIXES = [
   "/listings",
   "/apply",
   "/portal",
+  // Signing links are their own credential, like portal links.
+  "/sign",
   "/login",
   "/api/auth",
   "/api/opensign/webhook",

@@ -9,9 +9,14 @@ import type { Person } from "@/lib/types";
 
 export const metadata = { title: "Lease" };
 
+/**
+ * Status shortcuts for a lease that was handled outside the app — signed on
+ * paper, say. The real signing flow lives in the panel below, so these are
+ * worded as bookkeeping ("mark as…") to keep the two apart.
+ */
 const TRANSITIONS: Record<string, { status: string; label: string }[]> = {
-  draft: [{ status: "sent", label: "Send for signature" }, { status: "active", label: "Activate now" }],
-  sent: [{ status: "signed", label: "Mark signed" }],
+  draft: [{ status: "active", label: "Skip signing — activate now" }],
+  sent: [{ status: "signed", label: "Mark as signed" }],
   signed: [{ status: "active", label: "Activate lease" }],
   active: [{ status: "ended", label: "End lease" }],
   ended: [{ status: "active", label: "Reactivate" }],
