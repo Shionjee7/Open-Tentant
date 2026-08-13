@@ -452,6 +452,78 @@ export async function monthlyTotals(months: number) {
   return [...buckets.values()];
 }
 
+export type MonthRow = {
+  /** "2026-08" */
+  month: string;
+  income: number;
+  expenses: number;
+  net: number;
+  /** Rent due in this month, and how much of it arrived. */
+  rentDue: number;
+  rentPaid: number;
+  /** Everything kept from the first month shown up to and including this one. */
+  running: number;
+  /** True for the month we're in — it isn't finished, so it reads low. */
+  current: boolean;
+};
+
+/**
+ * The year, month by month.
+ *
+ * The question a landlord actually asks is "how did I do?", and the honest
+ * answer is a column of months you can run your eye down. Income and expenses
+ * come from booked transactions; rent due and rent paid come from the schedule,
+ * so a month where the money hasn't landed yet still shows what was owed.
+ */
+export async function monthlyLedger(months = 12): Promise<MonthRow[]> {
+  const [transactions, payments] = await Promise.all([
+    fetchAll<Txn>("transactions"),
+    fetchAll<Payment>("payments"),
+  ]);
+
+  const now = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const rows = new Map<string, MonthRow>();
+
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    rows.set(month, {
+      month,
+      income: 0,
+      expenses: 0,
+      net: 0,
+      rentDue: 0,
+      rentPaid: 0,
+      running: 0,
+      current: month === thisMonth,
+    });
+  }
+
+  for (const transaction of transactions) {
+    const row = rows.get((transaction.date ?? "").slice(0, 7));
+    if (!row) continue;
+    if (transaction.type === "income") row.income += transaction.amount;
+    else row.expenses += transaction.amount;
+  }
+
+  for (const payment of payments) {
+    const row = rows.get((payment.due_date ?? "").slice(0, 7));
+    if (!row) continue;
+    row.rentDue += payment.amount;
+    if (payment.status === "paid") row.rentPaid += payment.amount;
+  }
+
+  let running = 0;
+  const ordered = [...rows.values()];
+  for (const row of ordered) {
+    row.net = row.income - row.expenses;
+    running += row.net;
+    row.running = running;
+  }
+  return ordered;
+}
+
 export async function totalsByType(): Promise<{ income: number; expenses: number }> {
   const transactions = await fetchAll<Txn>("transactions");
   return transactions.reduce(

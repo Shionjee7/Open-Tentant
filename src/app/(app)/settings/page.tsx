@@ -1,7 +1,7 @@
 import { listQuestions } from "@/lib/data";
 import { getSetting } from "@/lib/data";
 import { archiveQuestion, createQuestion, saveSettings, sendTestEmail } from "@/lib/actions";
-import { PageHeader, ProBadge } from "@/components/ui";
+import { HubLinks, PageHeader, ProBadge } from "@/components/ui";
 import EmailSettings from "@/components/EmailSettings";
 import { titleCase } from "@/lib/format";
 import {
@@ -24,6 +24,14 @@ export default async function SettingsPage({
   return (
     <>
       <PageHeader title="Settings" subtitle="Your business details, payment setup, e-sign, and application questions." />
+
+      <HubLinks
+        links={[
+          { href: "/start", label: "Start here", detail: "The step-by-step setup, and what's left to do" },
+          { href: "/resources", label: "How-to guides", detail: "Screening, rent, rooms, reconciling" },
+          { href: "/listings", label: "Public listings", detail: "What prospective tenants see" },
+        ]}
+      />
 
       <div className="grid gap-6 xl:grid-cols-2">
         <form action={saveSettings} className="card space-y-4 p-6">

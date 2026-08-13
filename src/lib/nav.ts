@@ -1,72 +1,64 @@
 /**
  * The menu.
  *
- * A landlord renting out a few rooms touches five or six screens; the rest are
- * for specific moments — filling a vacancy, signing a lease, a move-out
- * walkthrough. So the short menu is the default and everything else sits
- * behind "Show all", grouped by when you'd actually reach for it.
+ * Seven entries, and no second tier. It used to be seven plus a "Show all
+ * features" toggle that revealed fourteen — which meant half the app lived
+ * somewhere you had to go looking for, and the menu itself became a thing to
+ * learn. Everything now hangs off one of these seven, one hop away, from the
+ * page it belongs to: rent and banking and the books from Money, leases and
+ * applications and documents from Tenants, setup and guides from Settings.
  *
- * Labels are deliberately plain: "Rent" rather than "Payments", "Tenants"
- * rather than "Leads & Tenants".
+ * The order is the order a landlord uses them, not the order the app was built
+ * in. Labels are plain: "Rent", not "Payments"; "Repairs", not "Maintenance".
  */
 
 export type NavItem = {
   href: string;
   label: string;
   icon: string;
-  /** One-line hint shown in the full menu, so nothing is a mystery. */
+  /** One-line hint, shown as a tooltip and on the phone menu. */
   hint?: string;
 };
 
-export type NavGroup = {
-  title: string;
-  items: NavItem[];
-};
-
-/** What you use most weeks. */
-export const EVERYDAY: NavItem[] = [
-  { href: "/", label: "Home", icon: "▦", hint: "How everything is doing right now" },
+export const NAV: NavItem[] = [
+  { href: "/", label: "Home", icon: "▦", hint: "This month at a glance" },
+  { href: "/money", label: "Money", icon: "$", hint: "What you kept, month by month" },
+  { href: "/payments", label: "Rent", icon: "◷", hint: "Who has paid and who hasn't" },
   { href: "/properties", label: "Properties", icon: "⌂", hint: "Your places, and the rooms in them" },
-  { href: "/contacts", label: "Tenants", icon: "☺", hint: "Who lives where, and their portal links" },
-  { href: "/payments", label: "Rent", icon: "$", hint: "What's due, what's paid, month-end receipts" },
+  { href: "/contacts", label: "Tenants", icon: "☺", hint: "Who lives where, leases, applications" },
   { href: "/maintenance", label: "Repairs", icon: "⚒︎", hint: "Requests from you or your tenants" },
+  { href: "/settings", label: "Settings", icon: "⚙", hint: "Your details, email, lease terms, setup" },
 ];
 
-/** Everything, grouped by the moment you need it. */
-export const ALL_GROUPS: NavGroup[] = [
-  { title: "Everyday", items: EVERYDAY },
-  {
-    title: "Filling a vacancy",
-    items: [
-      { href: "/applications", label: "Applications", icon: "✎", hint: "People applying to rent from you" },
-      { href: "/leases", label: "Leases", icon: "§", hint: "Write, send, and sign the lease" },
-      { href: "/documents", label: "Documents", icon: "✍︎", hint: "Leases and notices, and their signing status" },
-      { href: "/signing-app", label: "Signing app", icon: "✒︎", hint: "OpenSign, for signing anything that isn't a lease" },
-      { href: "/condition-reports", label: "Condition reports", icon: "☑︎", hint: "Move-in and move-out walkthroughs" },
-    ],
-  },
-  {
-    title: "Money",
-    items: [
-      { href: "/banking", label: "Bank deposits", icon: "≡", hint: "Upload a statement, match it to tenants" },
-      { href: "/accounting", label: "Accounting", icon: "Σ", hint: "Income, expenses, and what's ahead" },
-    ],
-  },
-  {
-    title: "Setup & help",
-    items: [
-      { href: "/start", label: "Start here", icon: "◎", hint: "The step-by-step setup" },
-      { href: "/resources", label: "How-to guides", icon: "?", hint: "Screening, rent, rooms, reconciling" },
-      { href: "/settings", label: "Settings", icon: "⚙", hint: "Your details, email, lease terms, sign-in" },
-    ],
-  },
+/**
+ * Pages that aren't in the menu but belong to something that is. Used to keep
+ * the right entry lit and to title the phone header, so you always know where
+ * you are even three levels down.
+ */
+const BELONGS_TO: [string, string][] = [
+  ["/banking", "/money"],
+  ["/accounting", "/money"],
+  ["/reports", "/money"],
+  ["/leases", "/contacts"],
+  ["/applications", "/contacts"],
+  ["/documents", "/contacts"],
+  ["/condition-reports", "/contacts"],
+  ["/signing-app", "/contacts"],
+  ["/start", "/settings"],
+  ["/resources", "/settings"],
 ];
 
-/** The short menu: everyday items, plus the two you always need to reach. */
-export const SIMPLE: NavItem[] = [
-  ...EVERYDAY,
-  { href: "/start", label: "Start here", icon: "◎" },
-  { href: "/settings", label: "Settings", icon: "⚙" },
-];
+function matches(pathname: string, href: string): boolean {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** Which menu entry owns this page — directly, or as one of its children. */
+export function activeItem(pathname: string): NavItem | undefined {
+  const direct = NAV.find((item) => matches(pathname, item.href));
+  if (direct) return direct;
+  const parent = BELONGS_TO.find(([child]) => matches(pathname, child));
+  return parent ? NAV.find((item) => item.href === parent[1]) : undefined;
+}
 
 export const MENU_COOKIE = "opentenant_menu";

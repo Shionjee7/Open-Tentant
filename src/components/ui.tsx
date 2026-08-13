@@ -158,6 +158,34 @@ export function StartHere({
   );
 }
 
+/**
+ * The pages that belong to this one.
+ *
+ * The menu is seven entries and nothing hides behind a toggle, which only works
+ * if every other page is one click from the entry that owns it. This is that
+ * click — put it near the top of a hub page.
+ */
+export function HubLinks({
+  links,
+}: {
+  links: { href: string; label: string; detail: string }[];
+}) {
+  return (
+    <nav className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {links.map((link) => (
+        <Link
+          key={link.href}
+          href={link.href}
+          className="card px-4 py-3 transition hover:border-brand-300 hover:shadow"
+        >
+          <div className="text-sm font-medium text-ink-900">{link.label}</div>
+          <div className="mt-0.5 text-xs text-ink-500">{link.detail}</div>
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
 export function BackLink({ href, label }: { href: string; label: string }) {
   return (
     <Link href={href} className="mb-4 inline-block text-sm text-brand-600 hover:underline">

@@ -1,12 +1,18 @@
 # One origin for OpenSign: the app at /, its API under /api.
 #
-# `frame_ancestors` lets OpenTenant show it inside a page, so signing lives in
-# the same tab as everything else. Only this app's own origin may frame it —
-# nobody else's site can.
+# OpenSign ships X-Frame-Options, which stops OpenTenant showing it in a page at
+# all. We drop that and replace it with a frame-ancestors policy naming who may
+# embed it.
+#
+# The localhost wildcards matter: OpenTenant is a local-first app and people run
+# it on whatever port is free — 3000, 3211, 8080. Pinning a single port meant the
+# signing page rendered an empty box with ERR_BLOCKED_BY_RESPONSE for anyone not
+# on the default. Any local port may frame it; on a real deployment set APP_URL
+# and that origin is allowed too. Everything else is still refused.
 :3001 {
 	header {
 		-X-Frame-Options
-		Content-Security-Policy "frame-ancestors 'self' {$APP_URL:http://localhost:3000}"
+		Content-Security-Policy "frame-ancestors 'self' http://localhost:* http://127.0.0.1:* https://localhost:* {$APP_URL:http://localhost:3000}"
 	}
 
 	handle_path /api/* {

@@ -1,10 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies, headers } from "next/headers";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { pb } from "./pb";
-import { MENU_COOKIE } from "./nav";
 import { premisesLabel, renderLease } from "./lease-render";
 import {
   CONSENT_TEXT,
@@ -58,21 +57,6 @@ function refresh() {
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-/**
- * Switch between the short menu and the full one. A cookie rather than a
- * setting, because it's a per-person preference on a shared account.
- */
-export async function setMenuMode(form: FormData) {
-  const mode = s(form, "mode") === "all" ? "all" : "simple";
-  const store = await cookies();
-  store.set(MENU_COOKIE, mode, {
-    path: "/",
-    maxAge: 60 * 60 * 24 * 365,
-    sameSite: "lax",
-  });
-  refresh();
 }
 
 /** Public base URL, used to build links inside emails. */

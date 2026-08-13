@@ -4,12 +4,14 @@ import {
   isDatabaseEmpty,
   leasesExpiringWithin,
   listMaintenance,
+  monthlyLedger,
   pastDuePayments,
   upcomingPayments,
 } from "@/lib/data";
 import { loadDemoData } from "@/lib/actions";
-import { money, shortDate, daysUntil } from "@/lib/format";
+import { money, monthLabel, shortDate, daysUntil } from "@/lib/format";
 import { Badge, EmptyState, PageHeader, StatCard } from "@/components/ui";
+import MonthlyMoney from "@/components/MonthlyMoney";
 
 export default async function DashboardPage() {
   if (await isDatabaseEmpty()) {
@@ -42,6 +44,9 @@ export default async function DashboardPage() {
   const upcoming = await upcomingPayments();
   const expiring = await leasesExpiringWithin(90);
   const openMaint = (await listMaintenance()).filter((m) => m.status === "new" || m.status === "in_progress");
+  const months = await monthlyLedger(6);
+  const thisMonth = months[months.length - 1];
+  const bookedAnything = months.some((m) => m.income > 0 || m.expenses > 0);
 
   return (
     <>
@@ -55,6 +60,38 @@ export default async function DashboardPage() {
           </div>
         }
       />
+
+      {bookedAnything && (
+        <section className="card mb-6 overflow-hidden">
+          <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 p-5 sm:p-6">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+                Kept in {monthLabel(thisMonth.month)} so far
+              </div>
+              <div
+                className={`mt-1 text-4xl font-bold sm:text-5xl ${
+                  thisMonth.net >= 0 ? "text-ink-900" : "text-rose-700"
+                }`}
+                style={{ fontVariantNumeric: "tabular-nums" }}
+              >
+                {money(thisMonth.net)}
+              </div>
+              <div
+                className="mt-1 text-sm text-ink-500"
+                style={{ fontVariantNumeric: "tabular-nums" }}
+              >
+                {money(thisMonth.income)} in · {money(thisMonth.expenses)} out
+              </div>
+            </div>
+            <Link href="/money" className="btn-secondary">
+              See every month →
+            </Link>
+          </div>
+          <div className="border-t border-slate-100">
+            <MonthlyMoney rows={months} />
+          </div>
+        </section>
+      )}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <StatCard label="Properties" value={stats.properties} hint={`${stats.occupied} occupied · ${stats.vacant} vacant`} />

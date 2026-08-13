@@ -13,7 +13,7 @@ import {
   setPersonStage,
 } from "@/lib/actions";
 import { money, shortDate } from "@/lib/format";
-import { Badge, EmptyState, PageHeader } from "@/components/ui";
+import { Badge, EmptyState, HubLinks, PageHeader } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
 
 export const metadata = { title: "Tenants" };
@@ -98,6 +98,16 @@ export default async function ContactsPage({
         title="Tenants"
         subtitle="People, where they live, and whether this month’s rent is in."
         action={<Link href="/contacts/new?stage=tenant" className="btn">+ Add tenant</Link>}
+      />
+
+      <HubLinks
+        links={[
+          { href: "/applications", label: "Applications", detail: "People applying to rent from you" },
+          { href: "/leases", label: "Leases", detail: "Write, send, and sign a lease" },
+          { href: "/documents", label: "Documents", detail: "Leases and notices, and their signing status" },
+          { href: "/condition-reports", label: "Condition reports", detail: "Move-in and move-out walkthroughs" },
+          { href: "/signing-app", label: "Signing app", detail: "Sign anything that isn't a lease" },
+        ]}
       />
 
       {notice && (

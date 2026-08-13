@@ -30,6 +30,18 @@ export function monthLabel(ym: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short" });
 }
 
+/**
+ * "Aug" inside one year, "Aug '25" when a list spans two — otherwise a run of
+ * twelve months has two Augusts in it and no way to tell them apart.
+ */
+export function monthLabelIn(ym: string, allMonths: string[]): string {
+  const years = new Set(allMonths.map((m) => m.slice(0, 4)));
+  const [y, m] = ym.split("-").map(Number);
+  const date = new Date(y, m - 1, 1);
+  if (years.size < 2) return date.toLocaleDateString("en-US", { month: "short" });
+  return `${date.toLocaleDateString("en-US", { month: "short" })} '${String(y).slice(2)}`;
+}
+
 export function daysUntil(d: string): number {
   const target = new Date(d + "T00:00:00").getTime();
   const now = new Date();
