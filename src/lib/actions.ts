@@ -110,6 +110,147 @@ export async function loadDemoData() {
 
 // ---------- Properties ----------
 
+function propertyFields(form: FormData) {
+  const byRoom = s(form, "rental_type") === "by_room";
+  const enteredName = s(form, "name");
+
+  return {
+    // PocketBase requires a name. A draft can exist before the manager has
+    // decided what to call it, so keep a quiet placeholder until they do.
+    name: enteredName || s(form, "address") || "Untitled property",
+    address: s(form, "address"),
+    city: s(form, "city"),
+    state: s(form, "state"),
+    zip: s(form, "zip"),
+    type: s(form, "type") || "single_family",
+    beds: n(form, "beds"),
+    baths: n(form, "baths"),
+    sqft: n(form, "sqft"),
+    rent: n(form, "rent"),
+    deposit: n(form, "deposit"),
+    status: s(form, "status") || "vacant",
+    listed: flag(form, "listed"),
+    priority_listing: flag(form, "priority_listing"),
+    description: s(form, "description"),
+    amenities: s(form, "amenities"),
+    rental_type: byRoom ? "by_room" : "whole",
+  };
+}
+
+/**
+ * During initial setup, keep the automatically generated Room 1, Room 2, ...
+ * records aligned with the form. This is deliberately limited to untouched,
+ * vacant rooms so autosave can never remove or overwrite a room in use.
+ */
+async function syncSetupRooms(
+  client: Awaited<ReturnType<typeof pb>>,
+  propertyId: Id,
+  byRoom: boolean,
+  desiredCount: number,
+  roomRent: number
+) {
+  const rooms = await client
+    .collection("units")
+    .getFullList({ perPage: 200, filter: `property="${propertyId}"`, sort: "+created" });
+  const isUntouchedSetupRoom = (room: Record<string, unknown>) =>
+    /^Room \d+$/.test(String(room.name ?? "")) &&
+    room.status === "vacant" &&
+    !room.description &&
+    !room.private_bath &&
+    !room.furnished;
+
+  const count = byRoom ? Math.max(1, Math.min(20, desiredCount || 1)) : 0;
+
+  for (let index = rooms.length; index < count; index++) {
+    rooms.push(
+      await client.collection("units").create({
+        property: propertyId,
+        name: `Room ${index + 1}`,
+        rent: roomRent,
+        deposit: roomRent,
+        status: "vacant",
+        listed: true,
+      })
+    );
+  }
+
+  // Only the trailing, untouched setup rooms are eligible for removal.
+  for (let index = rooms.length - 1; index >= count; index--) {
+    if (!isUntouchedSetupRoom(rooms[index])) break;
+    await client.collection("units").delete(rooms[index].id);
+    rooms.pop();
+  }
+
+  await Promise.all(
+    rooms.slice(0, count).map((room) =>
+      isUntouchedSetupRoom(room)
+        ? client.collection("units").update(room.id, { rent: roomRent, deposit: roomRent })
+        : Promise.resolve()
+    )
+  );
+}
+
+/**
+ * Create or update a property without redirecting. The client calls this after
+ * a short pause in typing and serializes calls, so newer edits cannot be
+ * overwritten by a slower, older request.
+ */
+export async function autosaveProperty(form: FormData) {
+  const client = await pb();
+  const existingId = s(form, "id");
+  const fields = propertyFields(form);
+  const property = existingId
+    ? await client.collection("properties").update(existingId, fields)
+    : await client.collection("properties").create(fields);
+
+  if (flag(form, "setup_rooms")) {
+    await syncSetupRooms(
+      client,
+      property.id,
+      fields.rental_type === "by_room",
+      n(form, "room_count"),
+      n(form, "room_rent")
+    );
+  }
+
+  return { id: property.id, savedAt: new Date().toISOString() };
+}
+
+export async function archiveProperty(form: FormData) {
+  const client = await pb();
+  const id = s(form, "id");
+  const property = await client.collection("properties").getOne(id).catch(() => null);
+  if (!property) return;
+
+  const [tenants, leases] = await Promise.all([
+    client
+      .collection("people")
+      .getFullList({ perPage: 200, filter: `property="${id}" && stage="tenant" && archived=false` }),
+    client.collection("leases").getFullList({ perPage: 200, filter: `property="${id}"` }),
+  ]);
+  const activeLeases = leases.filter((lease) =>
+    ["sent", "signed", "active"].includes(lease.status)
+  );
+  if (tenants.length > 0 || activeLeases.length > 0) {
+    redirect(`/properties/${id}?error=occupied`);
+  }
+
+  await client.collection("properties").update(id, {
+    archived: true,
+    listed: false,
+    priority_listing: false,
+  });
+  refresh();
+  redirect("/properties?removed=1");
+}
+
+export async function restoreProperty(form: FormData) {
+  const client = await pb();
+  await client.collection("properties").update(s(form, "id"), { archived: false });
+  refresh();
+  redirect("/properties?view=removed&restored=1");
+}
+
 export async function createProperty(form: FormData) {
   const client = await pb();
   const byRoom = s(form, "rental_type") === "by_room";
@@ -200,6 +341,35 @@ async function syncPropertyOccupancy(propertyId: Id) {
     .update(propertyId, { status: anyOccupied ? "occupied" : "vacant" });
 }
 
+async function syncUnitOccupancy(unitId: Id) {
+  if (!unitId) return;
+  const client = await pb();
+  const residents = await client
+    .collection("people")
+    .getFullList({ perPage: 200, filter: `unit="${unitId}"` });
+  const occupied = residents.some((person) => person.stage === "tenant" && !person.archived);
+  await client.collection("units").update(unitId, { status: occupied ? "occupied" : "vacant" });
+}
+
+async function syncWholePropertyOccupancy(propertyId: Id) {
+  if (!propertyId) return;
+  const client = await pb();
+  const property = await client.collection("properties").getOne(propertyId).catch(() => null);
+  if (!property) return;
+  if (property.rental_type === "by_room") {
+    await syncPropertyOccupancy(propertyId);
+    return;
+  }
+
+  const residents = await client
+    .collection("people")
+    .getFullList({ perPage: 200, filter: `property="${propertyId}"` });
+  const occupied = residents.some((person) => person.stage === "tenant" && !person.archived);
+  await client
+    .collection("properties")
+    .update(propertyId, { status: occupied ? "occupied" : "vacant" });
+}
+
 export async function createUnit(form: FormData) {
   const client = await pb();
   const propertyId = s(form, "property_id");
@@ -261,6 +431,26 @@ export async function updateUnit(form: FormData) {
   await syncPropertyOccupancy(propertyId);
   refresh();
   redirect(`/properties/${propertyId}`);
+}
+
+/** Saves room details in place without interrupting the property editor. */
+export async function autosaveUnit(form: FormData) {
+  const client = await pb();
+  const id = s(form, "id");
+  if (!id) throw new Error("A room is required before it can be saved.");
+
+  await client.collection("units").update(id, {
+    name: s(form, "name") || "Room",
+    rent: n(form, "rent"),
+    deposit: n(form, "deposit"),
+    size_sqft: n(form, "size_sqft"),
+    private_bath: flag(form, "private_bath"),
+    furnished: flag(form, "furnished"),
+    listed: flag(form, "listed"),
+    description: s(form, "description"),
+  });
+
+  return { id, savedAt: new Date().toISOString() };
 }
 
 export async function deleteUnit(form: FormData) {
@@ -328,6 +518,52 @@ export async function toggleListing(form: FormData) {
 }
 
 // ---------- People ----------
+
+export async function autosavePerson(form: FormData) {
+  const client = await pb();
+  const existingId = s(form, "id");
+  const existing = existingId
+    ? await client.collection("people").getOne(existingId).catch(() => null)
+    : null;
+  const stage = ["lead", "applicant", "tenant", "past"].includes(s(form, "stage"))
+    ? s(form, "stage")
+    : "tenant";
+
+  let propertyId = rel(form, "property_id");
+  let unitId = rel(form, "unit_id");
+  if (unitId) {
+    const unit = await client.collection("units").getOne(unitId).catch(() => null);
+    if (!unit) unitId = "";
+    else propertyId = unit.property;
+  }
+
+  const fields = {
+    first_name: s(form, "first_name") || "New",
+    last_name: s(form, "last_name") || (s(form, "first_name") ? "" : "contact"),
+    email: s(form, "email"),
+    phone: s(form, "phone"),
+    stage,
+    property: propertyId,
+    unit: unitId,
+    notes: s(form, "notes"),
+    portal_token: existing?.portal_token || crypto.randomUUID(),
+    archived: false,
+  };
+
+  const person = existing
+    ? await client.collection("people").update(existing.id, fields)
+    : await client.collection("people").create(fields);
+
+  const affectedUnits = new Set<Id>([existing?.unit, unitId].filter(Boolean));
+  for (const affectedUnit of affectedUnits) await syncUnitOccupancy(affectedUnit);
+
+  const affectedProperties = new Set<Id>([existing?.property, propertyId].filter(Boolean));
+  for (const affectedProperty of affectedProperties) {
+    await syncWholePropertyOccupancy(affectedProperty);
+  }
+
+  return { id: person.id, savedAt: new Date().toISOString() };
+}
 
 export async function createPerson(form: FormData) {
   const client = await pb();
@@ -968,7 +1204,13 @@ export async function createPayment(form: FormData) {
 }
 
 /** Books an income transaction for a payment that has been received. */
-async function bookPaymentIncome(paymentId: Id, paidDate: string, method: string, note: string) {
+async function bookPaymentIncome(
+  paymentId: Id,
+  paidDate: string,
+  method: string,
+  note: string,
+  bankImportId: Id = ""
+) {
   const client = await pb();
   const payment = await client.collection("payments").getOne(paymentId);
   let propertyId = "";
@@ -984,6 +1226,7 @@ async function bookPaymentIncome(paymentId: Id, paidDate: string, method: string
     amount: payment.amount,
     description: note,
     payment: paymentId,
+    bank_import: bankImportId,
   });
 }
 
@@ -1326,6 +1569,7 @@ export async function bookImportAsExpense(form: FormData) {
     category: s(form, "category") || "other",
     amount: Math.abs(deposit.amount),
     description: deposit.description,
+    bank_import: importId,
   });
   await client.collection("bank_imports").update(importId, { status: "expense_booked" });
   refresh();
@@ -1364,7 +1608,8 @@ export async function matchImport(form: FormData) {
     paymentId,
     deposit.posted_date,
     deposit.source,
-    `Bank deposit matched — ${deposit.description}`.slice(0, 200)
+    `Bank deposit matched — ${deposit.description}`.slice(0, 200),
+    importId
   );
   await client.collection("bank_imports").update(importId, {
     status: "matched",
@@ -1388,6 +1633,7 @@ export async function bookImportAsIncome(form: FormData) {
     category: s(form, "category") || "other",
     amount: deposit.amount,
     description: `Bank deposit — ${deposit.description}`.slice(0, 200),
+    bank_import: importId,
   });
   await client.collection("bank_imports").update(importId, { status: "matched" });
   refresh();
@@ -1407,13 +1653,13 @@ export async function unignoreImport(form: FormData) {
 
 export async function clearImports(form: FormData) {
   const status = s(form, "status");
-  if (status !== "ignored" && status !== "matched") return;
+  if (!["ignored", "matched", "expense_review", "expense_booked"].includes(status)) return;
   const client = await pb();
   const deposits = await client
     .collection("bank_imports")
     .getFullList({ perPage: 1000, filter: `status="${status}"` });
   for (const deposit of deposits) {
-    await client.collection("bank_imports").delete(deposit.id);
+    await client.collection("bank_imports").update(deposit.id, { hidden: true });
   }
   refresh();
 }
@@ -1668,42 +1914,76 @@ export async function sendMonthlyReceipts(form: FormData) {
   redirect(`/payments?receipts=${sent}&noreceipt=${skipped}`);
 }
 
-/**
- * Moves a tenant out: ends their active lease, frees the room, and files them
- * under past tenants. The one button a landlord actually reaches for when
- * someone leaves.
- */
-export async function moveOutTenant(form: FormData) {
+async function moveOutPerson(personId: Id) {
   const client = await pb();
-  const personId = s(form, "id");
   const person = await client.collection("people").getOne(personId).catch(() => null);
-  if (!person) return;
+  if (!person) return null;
 
   const leases = await client
     .collection("leases")
     .getFullList({ perPage: 200, filter: `tenants~"${personId}"` })
     .catch(() => []);
+  const affectedUnits = new Set<Id>([person.unit].filter(Boolean));
+  const affectedProperties = new Set<Id>([person.property].filter(Boolean));
 
-  for (const lease of leases.filter((l) => l.status === "active" || l.status === "signed")) {
-    await client.collection("leases").update(lease.id, { status: "ended" });
-    if (lease.unit) {
-      await client.collection("units").update(lease.unit, { status: "vacant" });
-      await syncPropertyOccupancy(lease.property);
-    } else if (lease.property) {
-      await client.collection("properties").update(lease.property, { status: "vacant" });
-    }
-  }
-
-  // Free the room even when there was no lease record to end.
-  if (person.unit) {
-    await client.collection("units").update(person.unit, { status: "vacant" }).catch(() => {});
-    if (person.property) await syncPropertyOccupancy(person.property);
+  for (const lease of leases.filter((row) => row.status === "active" || row.status === "signed")) {
+    const tenants = Array.isArray(lease.tenants) ? lease.tenants : [];
+    const remaining = tenants.filter((id: Id) => id !== personId);
+    await client.collection("leases").update(lease.id, {
+      tenants: remaining,
+      ...(remaining.length === 0 ? { status: "ended" } : {}),
+    });
+    if (lease.unit) affectedUnits.add(lease.unit);
+    if (lease.property) affectedProperties.add(lease.property);
   }
 
   await client.collection("people").update(personId, { stage: "past", unit: "" });
 
+  // Recalculate from the records that remain. This keeps a shared household or
+  // room occupied when one person leaves but somebody else still lives there.
+  for (const unitId of affectedUnits) await syncUnitOccupancy(unitId);
+  for (const propertyId of affectedProperties) await syncWholePropertyOccupancy(propertyId);
+  return person;
+}
+
+/** Moves one tenant out without disturbing housemates who remain. */
+export async function moveOutTenant(form: FormData) {
+  const person = await moveOutPerson(s(form, "id"));
+  if (!person) return;
   refresh();
   redirect("/contacts?stage=past&moved=1");
+}
+
+/**
+ * Recoverable tenant removal. Historical leases and payments keep their person
+ * relation, while their portal token is revoked immediately.
+ */
+export async function archivePerson(form: FormData) {
+  const client = await pb();
+  const id = s(form, "id");
+  const person = await client.collection("people").getOne(id).catch(() => null);
+  if (!person) return;
+
+  if (person.stage === "tenant") await moveOutPerson(id);
+  await client.collection("people").update(id, {
+    archived: true,
+    stage: "past",
+    unit: "",
+    portal_token: "",
+  });
+  refresh();
+  redirect("/contacts?view=removed&removed=1");
+}
+
+export async function restorePerson(form: FormData) {
+  const client = await pb();
+  await client.collection("people").update(s(form, "id"), {
+    archived: false,
+    stage: "past",
+    portal_token: crypto.randomUUID(),
+  });
+  refresh();
+  redirect("/contacts?view=removed&restored=1");
 }
 
 /** Sends a test message so you can prove the SMTP settings work. */

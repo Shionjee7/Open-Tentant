@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, authGateEnabled, isPublicPath, readSession } from "@/lib/auth";
 
-export async function middleware(request: NextRequest) {
-  // Neither a password nor Google sign-in is configured — the app runs open
-  // (fine on your own machine, not fine on a public host).
+export async function proxy(request: NextRequest) {
+  // Neither a password nor Google sign-in is configured: the app runs open
+  // locally, while public deployments should always configure a login gate.
   if (!authGateEnabled()) return NextResponse.next();
 
   const { pathname } = request.nextUrl;

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { setMenuMode } from "@/lib/actions";
 import { ALL_GROUPS, SIMPLE, type NavItem } from "@/lib/nav";
 
@@ -34,6 +35,9 @@ export default function Sidebar({
 }) {
   const pathname = usePathname();
   const showAll = mode === "all";
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => setOpen(false), [pathname]);
 
   // If you land on a page the short menu hides — a link from the dashboard, a
   // bookmark — it joins the menu for that visit, so you're never somewhere the
@@ -41,8 +45,13 @@ export default function Sidebar({
   const here = ALL_GROUPS.flatMap((g) => g.items).find((i) => isActive(pathname, i.href));
   const visiting = !showAll && here && !SIMPLE.some((i) => i.href === here.href) ? here : null;
 
-  return (
-    <aside className="flex w-60 shrink-0 flex-col bg-[#0f1b33] text-slate-300">
+  const menu = (
+    <aside
+      id="main-menu"
+      className={`fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col bg-[#18233a] text-slate-200 shadow-xl transition-transform lg:sticky lg:top-0 lg:h-screen lg:w-60 lg:translate-x-0 lg:shadow-none ${
+        open ? "translate-x-0" : "-translate-x-full"
+      }`}
+    >
       <div className="flex items-center gap-2 px-5 py-5">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 font-bold text-white">
           O
@@ -53,6 +62,14 @@ export default function Sidebar({
             Free · Open Source
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="ml-auto flex h-10 w-10 items-center justify-center rounded-lg text-xl text-slate-300 hover:bg-white/10 hover:text-white lg:hidden"
+          aria-label="Close menu"
+        >
+          ×
+        </button>
       </div>
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 pb-2">
@@ -97,5 +114,35 @@ export default function Sidebar({
         )}
       </div>
     </aside>
+  );
+
+  return (
+    <>
+      <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white px-4 lg:hidden">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-300 text-xl text-ink-700"
+          aria-label="Open menu"
+          aria-controls="main-menu"
+          aria-expanded={open}
+        >
+          ☰
+        </button>
+        <div>
+          <div className="text-sm font-bold text-ink-900">OpenTenant</div>
+          <div className="text-xs text-ink-500">{here?.label ?? "Home"}</div>
+        </div>
+      </header>
+      {open && (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-slate-950/45 lg:hidden"
+          onClick={() => setOpen(false)}
+          aria-label="Close menu"
+        />
+      )}
+      {menu}
+    </>
   );
 }

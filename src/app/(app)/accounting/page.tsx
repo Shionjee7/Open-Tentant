@@ -33,6 +33,7 @@ export default async function AccountingPage() {
       <PageHeader
         title="Accounting"
         subtitle="Every payment you approve books itself as income automatically — add expenses to see true profit."
+        action={<Link href="/reports/portfolio" className="btn">Partner report</Link>}
       />
 
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">

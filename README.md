@@ -23,10 +23,10 @@ so you can never get lost.
 |---|---|
 | **Start here** | A six-step guided setup that tells you what's done and what's next, so a first-time landlord never faces a blank dashboard |
 | **Home** | Occupancy, active tenants & leases, collected this month/year, past due, open maintenance, expiring leases |
-| **Properties** | Full property records with rent, deposit, amenities, and listing controls — plus **address autocomplete** that fills city, state, and ZIP |
-| **Rent by the room** | Rent a house room by room: each room has its own rent, deposit, tenant, lease, and listing |
+| **Properties** | A short setup form that **autosaves while you type**, with address autocomplete, optional details, and recoverable removal |
+| **Rent by the room** | Rent a house room by room: each room has its own autosaving rent, deposit, tenant, lease, and listing |
 | **Public listings** | A marketing page (`/listings`) with online applications; vacant rooms list individually, and featured properties pin to the top |
-| **Tenants** | Pipeline from lead → applicant → tenant → past tenant, with one-click stage moves |
+| **Tenants** | A simple current-tenant roster with this month’s rent status, autosaving add/edit forms, move-out history, and recoverable removal |
 | **Applications** | Online applications with **custom questions**, an automatic income-to-rent check, and income verification |
 | **Tenant screening** | Track credit/criminal/eviction screening through any FCRA bureau — the applicant pays, you pay nothing ([how it works](docs/HOW-IT-WORKS.md)) |
 | **Leases** | Writes a complete lease from your data — summary, rent and deposits, penalties and fees, and full clauses, with your own fee amounts and house rules set once in Settings |
@@ -38,7 +38,7 @@ so you can never get lost.
 | **Repairs** | Requests with priority and status workflow, from tenants or you |
 | **Documents** | Track leases, addenda, and notices from draft → sent → signed |
 | **Condition reports** | 12-area move-in/move-out checklists that lock when completed |
-| **Accounting** | **Per property**: what each house earns after its own costs, per month, per year, and over 5 years, with a portfolio total. **Per bank**: what each account holds, carried forward from a balance you set. Plus expenses by category and an income-vs-expense chart |
+| **Accounting** | **Per property**: what each house earns after its own costs, plus a printable monthly **partner report** showing received rent, bills, net profit, and money still owed. **Per bank**: statement-backed balances without double-counting imported expenses |
 | **Email notifications** | Connect Gmail (or any SMTP) and the app confirms applications, alerts you to new ones, sends approval/denial notices, rent reminders, portal invites, maintenance updates, and **month-end rent receipts** with your business name and address |
 | **How-to guides** | Built-in guides for screening, rent collection, room rentals, and reconciliation |
 
@@ -69,6 +69,22 @@ or add your first property and start clean.
 For day-to-day development, run `npm run pb` in one terminal and `npm run dev` in another.
 Everything lives in `data/pb_data/` — back up that folder and you've backed up everything. The
 database console is at http://127.0.0.1:8090/_/.
+
+The database schema is versioned in `pb/pb_migrations/` and travels with the GitHub repository.
+The actual tenant and financial records stay in the ignored `data/` folder so private information
+is never committed accidentally.
+
+## Test the complete landlord workflow
+
+```bash
+npm run test:e2e
+```
+
+This builds the production app, starts a disposable PocketBase database, and drives Chromium through
+two five-room houses and ten tenants: autosave and reload, room assignments, leases, rent charges,
+bank accounts, statement matching, duplicate-import protection, utilities, mortgages, partner
+profit, signing, repairs, protected removal, restore flows, and mobile navigation. Test data is
+deleted when the run finishes. GitHub Actions runs the same workflow for pull requests.
 
 ## Signing leases
 
@@ -152,7 +168,7 @@ Every setting is optional — the app runs with none of them.
 
 ## Tech stack
 
-- [Next.js 15](https://nextjs.org) (App Router, Server Components + Server Actions)
+- [Next.js 16](https://nextjs.org) (App Router, Server Components + Server Actions)
 - [Tailwind CSS 4](https://tailwindcss.com)
 - [PocketBase](https://github.com/pocketbase/pocketbase) (MIT) — database, REST API, and admin
   console, running as its own process with SQLite storage

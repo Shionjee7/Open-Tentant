@@ -15,9 +15,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const mode = store.get(MENU_COOKIE)?.value === "all" ? "all" : "simple";
 
   return (
-    <div className="flex min-h-screen">
+    <div className="min-h-screen lg:flex">
       <Sidebar identity={identity} mode={mode} />
-      <main className="min-w-0 flex-1 px-6 py-6 lg:px-10 lg:py-8">{children}</main>
+      <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-10 lg:py-8">{children}</main>
     </div>
   );
 }

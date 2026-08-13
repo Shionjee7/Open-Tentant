@@ -69,12 +69,12 @@ function startOfYear(): string {
 
 // ---------- Properties ----------
 
-export async function listProperties(): Promise<Property[]> {
+export async function listProperties(includeArchived = false): Promise<Property[]> {
   const [properties, units] = await Promise.all([
     fetchAll<Property>("properties"),
     fetchAll<Unit>("units"),
   ]);
-  return properties.map((property) => {
+  return properties.filter((property) => includeArchived || !property.archived).map((property) => {
     const rooms = units.filter((u) => u.property === property.id);
     return {
       ...property,
@@ -112,7 +112,9 @@ async function decorateUnits(units: Unit[]): Promise<Unit[]> {
   const propertyMap = byId(properties);
   return units.map((unit) => {
     const property = propertyMap.get(unit.property);
-    const tenants = people.filter((p) => p.unit === unit.id && p.stage === "tenant");
+    const tenants = people.filter(
+      (p) => !p.archived && p.unit === unit.id && p.stage === "tenant"
+    );
     return {
       ...unit,
       property_name: property?.name,
@@ -144,7 +146,9 @@ export async function getUnit(id: Id): Promise<Unit | undefined> {
 export async function listedRooms(): Promise<Unit[]> {
   const [units, properties] = await Promise.all([listAllUnits(), fetchAll<Property>("properties")]);
   const listedByRoom = new Set(
-    properties.filter((p) => p.listed && p.rental_type === "by_room").map((p) => p.id)
+    properties
+      .filter((p) => !p.archived && p.listed && p.rental_type === "by_room")
+      .map((p) => p.id)
   );
   return units.filter((u) => listedByRoom.has(u.property) && u.listed && u.status === "vacant");
 }
@@ -165,9 +169,10 @@ async function decoratePeople(people: Person[]): Promise<Person[]> {
   }));
 }
 
-export async function listPeople(stage?: string): Promise<Person[]> {
+export async function listPeople(stage?: string, includeArchived = false): Promise<Person[]> {
   const people = await fetchAll<Person>("people");
-  return decoratePeople(stage ? people.filter((p) => p.stage === stage) : people);
+  const visible = people.filter((p) => includeArchived || !p.archived);
+  return decoratePeople(stage ? visible.filter((p) => p.stage === stage) : visible);
 }
 
 export async function getPerson(id: Id): Promise<Person | undefined> {
@@ -179,7 +184,7 @@ export async function getPerson(id: Id): Promise<Person | undefined> {
 export async function getPersonByToken(token: string): Promise<Person | undefined> {
   if (!token) return undefined;
   const people = await fetchAll<Person>("people");
-  const match = people.find((p) => p.portal_token === token);
+  const match = people.find((p) => !p.archived && p.portal_token === token);
   if (!match) return undefined;
   return (await decoratePeople([match]))[0];
 }
@@ -187,7 +192,9 @@ export async function getPersonByToken(token: string): Promise<Person | undefine
 export async function countPeopleByStage(): Promise<Record<string, number>> {
   const people = await fetchAll<Person>("people");
   const counts: Record<string, number> = { lead: 0, applicant: 0, tenant: 0, past: 0 };
-  for (const person of people) counts[person.stage] = (counts[person.stage] ?? 0) + 1;
+  for (const person of people.filter((p) => !p.archived)) {
+    counts[person.stage] = (counts[person.stage] ?? 0) + 1;
+  }
   return counts;
 }
 
@@ -556,7 +563,8 @@ export async function listBankImports(status?: string): Promise<BankImport[]> {
       matched_payment_date: payment?.paid_date || payment?.due_date || undefined,
     };
   });
-  return status ? decorated.filter((d) => d.status === status) : decorated;
+  const visible = decorated.filter((d) => !d.hidden);
+  return status ? visible.filter((d) => d.status === status) : visible;
 }
 
 /**
@@ -681,7 +689,9 @@ export async function propertyOutlooks(): Promise<PropertyOutlook[]> {
       ),
       rooms: property.rental_type === "by_room" ? ourRooms.length : 0,
       roomsOccupied: ourRooms.filter((u) => u.status === "occupied").length,
-      tenantCount: people.filter((p) => p.stage === "tenant" && p.property === property.id).length,
+      tenantCount: people.filter(
+        (p) => !p.archived && p.stage === "tenant" && p.property === property.id
+      ).length,
     };
   });
 }
@@ -720,7 +730,7 @@ export type AccountBalance = {
   account: BankAccount;
   /** Deposits imported since the opening balance date. */
   depositsIn: number;
-  /** Expenses booked to this account's property since that date. */
+  /** Statement withdrawals plus manual property expenses since that date. */
   expensesOut: number;
   balance: number;
   /** False when no opening balance is set, so the figure is only a movement. */
@@ -733,8 +743,10 @@ export type AccountBalance = {
  *
  * A statement import only covers what was uploaded, so it can't know a
  * balance on its own. Give the app a starting point and it carries it forward:
- * opening balance, plus everything imported since, minus what the linked
- * property spent. It's an estimate that reconciles against a real statement.
+ * opening balance, plus the signed movement on every imported statement row.
+ * Manual expenses not present on a statement are also subtracted. A ledger
+ * expense created from an imported withdrawal links back to that row so it is
+ * never counted twice.
  */
 export async function accountBalances(): Promise<AccountBalance[]> {
   const [accounts, deposits, transactions, properties] = await Promise.all([
@@ -748,23 +760,127 @@ export async function accountBalances(): Promise<AccountBalance[]> {
   return accounts.map((account) => {
     const from = account.balance_date || "";
     const ours = deposits.filter((d) => d.account === account.id && (!from || d.posted_date >= from));
-    const depositsIn = ours.reduce((total, d) => total + Math.abs(d.amount), 0);
-    const expensesOut = account.property
+    const depositsIn = ours
+      .filter((row) => row.amount > 0)
+      .reduce((total, row) => total + row.amount, 0);
+    const statementWithdrawals = ours
+      .filter((row) => row.amount < 0)
+      .reduce((total, row) => total + Math.abs(row.amount), 0);
+    const manualExpenses = account.property
       ? transactions
-          .filter((t) => t.type === "expense" && t.property === account.property && (!from || t.date >= from))
+          .filter(
+            (t) =>
+              t.type === "expense" &&
+              t.property === account.property &&
+              !t.bank_import &&
+              (!from || t.date >= from)
+          )
           .reduce((total, t) => total + t.amount, 0)
       : 0;
+    const expensesOut = statementWithdrawals + manualExpenses;
     const opening = account.opening_balance || 0;
 
     return {
       account: { ...account, property_name: propertyMap.get(account.property)?.name },
       depositsIn,
       expensesOut,
-      balance: opening + depositsIn - expensesOut,
+      balance: opening + ours.reduce((total, row) => total + row.amount, 0) - manualExpenses,
       known: Boolean(account.balance_date),
       lastImport: ours.map((d) => d.posted_date).sort().at(-1) ?? "",
     };
   });
+}
+
+export type MonthlyPropertyReport = {
+  property: Property;
+  rooms: number;
+  roomsOccupied: number;
+  tenants: number;
+  scheduledRent: number;
+  received: number;
+  expenses: number;
+  net: number;
+  outstanding: number;
+};
+
+/** Actual monthly figures arranged for a landlord or partner to review. */
+export async function monthlyPortfolioReport(month: string) {
+  const [properties, units, people, leases, payments, transactions, reviewRows] = await Promise.all([
+    listProperties(),
+    fetchAll<Unit>("units"),
+    fetchAll<Person>("people"),
+    fetchAll<Lease>("leases"),
+    fetchAll<Payment>("payments"),
+    fetchAll<Txn>("transactions"),
+    fetchAll<BankImport>("bank_imports"),
+  ]);
+  const leaseProperty = new Map(leases.map((lease) => [lease.id, lease.property]));
+  const inMonth = (date: string) => date.startsWith(month);
+
+  const rows: MonthlyPropertyReport[] = properties.map((property) => {
+    const ourUnits = units.filter((unit) => unit.property === property.id);
+    const ourPayments = payments.filter(
+      (payment) =>
+        payment.lease &&
+        leaseProperty.get(payment.lease) === property.id &&
+        inMonth(payment.due_date)
+    );
+    const ourTransactions = transactions.filter(
+      (transaction) => transaction.property === property.id && inMonth(transaction.date)
+    );
+    const received = ourTransactions
+      .filter((transaction) => transaction.type === "income")
+      .reduce((total, transaction) => total + transaction.amount, 0);
+    const expenses = ourTransactions
+      .filter((transaction) => transaction.type === "expense")
+      .reduce((total, transaction) => total + transaction.amount, 0);
+
+    return {
+      property,
+      rooms: property.rental_type === "by_room" ? ourUnits.length : 0,
+      roomsOccupied: ourUnits.filter((unit) => unit.status === "occupied").length,
+      tenants: people.filter(
+        (person) => !person.archived && person.stage === "tenant" && person.property === property.id
+      ).length,
+      scheduledRent: ourPayments
+        .filter((payment) => payment.type === "rent")
+        .reduce((total, payment) => total + payment.amount, 0),
+      received,
+      expenses,
+      net: received - expenses,
+      outstanding: ourPayments
+        .filter((payment) => payment.status !== "paid")
+        .reduce((total, payment) => total + payment.amount, 0),
+    };
+  });
+
+  const unassigned = transactions.filter(
+    (transaction) => !transaction.property && inMonth(transaction.date)
+  );
+  const unassignedIncome = unassigned
+    .filter((transaction) => transaction.type === "income")
+    .reduce((total, transaction) => total + transaction.amount, 0);
+  const unassignedExpenses = unassigned
+    .filter((transaction) => transaction.type === "expense")
+    .reduce((total, transaction) => total + transaction.amount, 0);
+
+  return {
+    month,
+    rows,
+    scheduledRent: rows.reduce((total, row) => total + row.scheduledRent, 0),
+    received: rows.reduce((total, row) => total + row.received, 0) + unassignedIncome,
+    expenses: rows.reduce((total, row) => total + row.expenses, 0) + unassignedExpenses,
+    net:
+      rows.reduce((total, row) => total + row.net, 0) +
+      unassignedIncome -
+      unassignedExpenses,
+    outstanding: rows.reduce((total, row) => total + row.outstanding, 0),
+    unassignedIncome,
+    unassignedExpenses,
+    needsReview: reviewRows.filter(
+      (row) => !row.hidden && ["unmatched", "already_recorded", "expense_review"].includes(row.status)
+    ).length,
+  };
 }
 
 // ---------- Dashboard ----------
@@ -799,10 +915,7 @@ export async function dashboardStats() {
 }
 
 export async function isDatabaseEmpty(): Promise<boolean> {
-  const [properties, people] = await Promise.all([
-    fetchAll<Property>("properties"),
-    fetchAll<Person>("people"),
-  ]);
+  const [properties, people] = await Promise.all([listProperties(), listPeople()]);
   return properties.length === 0 && people.length === 0;
 }
 

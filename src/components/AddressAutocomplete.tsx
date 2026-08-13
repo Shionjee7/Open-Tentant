@@ -23,11 +23,13 @@ export default function AddressAutocomplete({
   defaultCity = "",
   defaultState = "",
   defaultZip = "",
+  onFieldsChange,
 }: {
   defaultValue?: string;
   defaultCity?: string;
   defaultState?: string;
   defaultZip?: string;
+  onFieldsChange?: () => void;
 }) {
   const listId = useId();
   const [query, setQuery] = useState(defaultValue);
@@ -92,6 +94,7 @@ export default function AddressAutocomplete({
     setZip(s.zip);
     setOpen(false);
     setSuggestions([]);
+    onFieldsChange?.();
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -123,7 +126,10 @@ export default function AddressAutocomplete({
           id={listId}
           name="address"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            onFieldsChange?.();
+          }}
           onKeyDown={onKeyDown}
           onFocus={() => suggestions.length > 0 && setOpen(true)}
           className="input"
@@ -179,17 +185,17 @@ export default function AddressAutocomplete({
       </div>
 
       <div>
-        <label className="label">City</label>
-        <input name="city" value={city} onChange={(e) => setCity(e.target.value)} className="input" />
+        <label className="label" htmlFor={`${listId}-city`}>City</label>
+        <input id={`${listId}-city`} name="city" value={city} onChange={(e) => { setCity(e.target.value); onFieldsChange?.(); }} className="input" />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="label">State</label>
-          <input name="state" value={state} onChange={(e) => setState(e.target.value)} className="input" />
+          <label className="label" htmlFor={`${listId}-state`}>State</label>
+          <input id={`${listId}-state`} name="state" value={state} onChange={(e) => { setState(e.target.value); onFieldsChange?.(); }} className="input" />
         </div>
         <div>
-          <label className="label">ZIP</label>
-          <input name="zip" value={zip} onChange={(e) => setZip(e.target.value)} className="input" />
+          <label className="label" htmlFor={`${listId}-zip`}>ZIP</label>
+          <input id={`${listId}-zip`} name="zip" value={zip} onChange={(e) => { setZip(e.target.value); onFieldsChange?.(); }} className="input" />
         </div>
       </div>
     </>

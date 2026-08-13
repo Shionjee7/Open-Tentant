@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listPayments, reportedPayments, sumPaid, sumPastDue } from "@/lib/data";
+import { listPayments, reportedPayments } from "@/lib/data";
 import { getSetting } from "@/lib/data";
 import {
   approveReportedPayment,
@@ -11,32 +11,113 @@ import {
 } from "@/lib/actions";
 import { money, moneyExact, shortDate, titleCase } from "@/lib/format";
 import { Badge, EmptyState, PageHeader, StatCard } from "@/components/ui";
+import type { Payment } from "@/lib/types";
 
 export const metadata = { title: "Rent" };
+
+function paymentState(payment: Payment, today: string) {
+  if (payment.status === "paid") return "paid";
+  if (payment.status === "reported") return "reported";
+  return payment.due_date < today ? "past_due" : "upcoming";
+}
+
+function PaymentActions({ payment, compact = false }: { payment: Payment; compact?: boolean }) {
+  if (payment.status !== "unpaid") return null;
+
+  return (
+    <div className={`flex flex-wrap items-center gap-2 ${compact ? "mt-3" : "justify-end"}`}>
+      <form action={markPaymentPaid} className={`flex items-center gap-2 ${compact ? "min-w-0 flex-1" : ""}`}>
+        <input type="hidden" name="id" value={payment.id} />
+        <select
+          name="method"
+          aria-label={`Payment method for ${payment.tenant_name ?? "tenant"}`}
+          className={`input px-2 py-1 text-xs ${compact ? "min-w-0 flex-1" : "w-28"}`}
+          defaultValue="ach"
+        >
+          <option value="ach">ACH</option>
+          <option value="zelle">Zelle</option>
+          <option value="venmo">Venmo</option>
+          <option value="cash">Cash</option>
+          <option value="check">Check</option>
+          <option value="card">Card</option>
+          <option value="other">Other</option>
+        </select>
+        <button className="btn btn-sm">Mark paid</button>
+      </form>
+      <form action={sendPaymentReminder}>
+        <input type="hidden" name="id" value={payment.id} />
+        <button className="btn-secondary btn-sm" title="Email the tenant a reminder">Remind</button>
+      </form>
+      <form action={deletePayment}>
+        <input type="hidden" name="id" value={payment.id} />
+        <button
+          className="btn-secondary btn-sm"
+          title="Delete unpaid charge"
+          aria-label={`Delete unpaid charge for ${payment.tenant_name ?? "tenant"}`}
+        >
+          ✕
+        </button>
+      </form>
+    </div>
+  );
+}
 
 export default async function PaymentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ receipts?: string; noreceipt?: string; mail?: string }>;
+  searchParams: Promise<{
+    receipts?: string;
+    noreceipt?: string;
+    mail?: string;
+    month?: string;
+    view?: string;
+  }>;
 }) {
-  const { receipts, noreceipt, mail } = await searchParams;
+  const { receipts, noreceipt, mail, month: requestedMonth, view } = await searchParams;
   const thisMonth = new Date().toISOString().slice(0, 7);
-  const payments = await listPayments();
+  const month = /^\d{4}-\d{2}$/.test(requestedMonth ?? "") ? requestedMonth! : thisMonth;
+  const allPayments = await listPayments();
+  const payments = view === "all"
+    ? allPayments
+    : allPayments.filter((payment) => payment.due_date.startsWith(month));
   const reported = await reportedPayments();
   const methods = await getSetting("payment_methods");
   const today = new Date().toISOString().slice(0, 10);
+  const scheduled = payments.reduce((total, payment) => total + payment.amount, 0);
+  const received = payments
+    .filter((payment) => payment.status === "paid")
+    .reduce((total, payment) => total + payment.amount, 0);
+  const outstanding = payments
+    .filter((payment) => payment.status !== "paid")
+    .reduce((total, payment) => total + payment.amount, 0);
+  const paidCount = payments.filter((payment) => payment.status === "paid").length;
 
   return (
     <>
       <PageHeader
         title="Rent"
-        subtitle={
-          methods
-            ? `Accepted methods: ${methods}. Change them in Settings.`
-            : "Record and schedule rent, deposits, and fees. Set up your accepted payment methods in Settings."
-        }
+        subtitle="See who paid, match deposits, and follow up on what is still due."
         action={<Link href="/payments/new" className="btn">+ Record / schedule</Link>}
       />
+
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <form method="GET" className="flex items-end gap-2">
+          <div>
+            <label className="label">Month</label>
+            <input name="month" type="month" defaultValue={month} className="input w-44" />
+          </div>
+          <button className="btn-secondary">View</button>
+        </form>
+        {view === "all" ? (
+          <Link href={`/payments?month=${month}`} className="text-sm font-medium text-brand-600 hover:underline">
+            Show one month
+          </Link>
+        ) : (
+          <Link href="/payments?view=all" className="text-sm font-medium text-brand-600 hover:underline">
+            Show all charges
+          </Link>
+        )}
+      </div>
 
       {(receipts || mail) && (
         <div className="card mb-5 border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -53,25 +134,11 @@ export default async function PaymentsPage({
         </div>
       )}
 
-      <section className="card mb-6 p-5">
-        <h2 className="font-semibold">Month-end receipts</h2>
-        <p className="mt-1 text-xs text-ink-500">
-          Emails each tenant a receipt for what they actually paid that month — your business name and
-          address, the property and room, every payment itemized, and the total.
-        </p>
-        <form action={sendMonthlyReceipts} className="mt-3 flex flex-wrap items-end gap-2">
-          <div>
-            <label className="label">Month</label>
-            <input name="month" type="month" defaultValue={thisMonth} className="input w-48" />
-          </div>
-          <button className="btn">Send receipts</button>
-        </form>
-      </section>
-
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">
-        <StatCard label="Collected this month" value={money(await sumPaid("month"))} tone="good" />
-        <StatCard label="Collected this year" value={money(await sumPaid("year"))} tone="good" />
-        <StatCard label="Past due" value={money(await sumPastDue())} tone={await sumPastDue() > 0 ? "bad" : "default"} />
+      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+        <StatCard label="Scheduled" value={money(scheduled)} hint={view === "all" ? "all charges" : month} />
+        <StatCard label="Received" value={money(received)} tone="good" />
+        <StatCard label="Still owed" value={money(outstanding)} tone={outstanding > 0 ? "bad" : "default"} />
+        <StatCard label="Marked paid" value={`${paidCount}/${payments.length}`} hint="scheduled items" />
       </div>
 
       {reported.length > 0 && (
@@ -115,12 +182,41 @@ export default async function PaymentsPage({
 
       {payments.length === 0 ? (
         <EmptyState
-          title="No payments yet"
-          message="Schedule monthly rent for a lease and mark payments as they arrive — collected totals and past-due alerts flow to the dashboard automatically."
+          title={view === "all" ? "No payments yet" : "Nothing scheduled for this month"}
+          message="Schedule rent for a lease once, then compare each month with the deposits in your bank statement."
           action={<Link href="/payments/new" className="btn">+ Record / schedule</Link>}
         />
       ) : (
-        <div className="card overflow-x-auto">
+        <>
+          <ul className="card divide-y divide-slate-100 md:hidden">
+            {payments.map((payment) => (
+              <li key={payment.id} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-ink-900">
+                      {payment.tenant_name ?? "No tenant"}
+                    </div>
+                    <div className="truncate text-sm text-ink-500">
+                      {payment.property_name ?? "No property"}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="font-semibold">{moneyExact(payment.amount)}</div>
+                    <Badge value={paymentState(payment, today)} />
+                  </div>
+                </div>
+                <div className="mt-2 text-sm text-ink-700">
+                  {titleCase(payment.type)} · due {shortDate(payment.due_date)}
+                  {payment.paid_date && (
+                    <span className="text-ink-500"> · paid {shortDate(payment.paid_date)} via {payment.method}</span>
+                  )}
+                </div>
+                <PaymentActions payment={payment} compact />
+              </li>
+            ))}
+          </ul>
+
+          <div className="card hidden overflow-x-auto md:block">
           <table className="w-full min-w-[720px]">
             <thead>
               <tr>
@@ -135,7 +231,6 @@ export default async function PaymentsPage({
             </thead>
             <tbody>
               {payments.map((p) => {
-                const pastDue = p.status === "unpaid" && p.due_date < today;
                 return (
                   <tr key={p.id} className="table-row">
                     <td className="td">{shortDate(p.due_date)}</td>
@@ -145,56 +240,38 @@ export default async function PaymentsPage({
                     <td className="td font-medium">{moneyExact(p.amount)}</td>
                     <td className="td">
                       <Badge
-                        value={
-                          p.status === "paid"
-                            ? "paid"
-                            : p.status === "reported"
-                              ? "reported"
-                              : pastDue
-                                ? "past_due"
-                                : "upcoming"
-                        }
+                        value={paymentState(p, today)}
                       />
                       {p.paid_date && (
                         <div className="mt-0.5 text-xs text-ink-500">{shortDate(p.paid_date)} · {p.method}</div>
                       )}
                     </td>
                     <td className="td text-right">
-                      {p.status === "unpaid" && (
-                        <div className="flex items-center justify-end gap-1.5">
-                          <form action={markPaymentPaid} className="flex items-center gap-1.5">
-                            <input type="hidden" name="id" value={p.id} />
-                            <select name="method" className="input w-28 px-2 py-1 text-xs" defaultValue="ach">
-                              <option value="ach">ACH</option>
-                              <option value="zelle">Zelle</option>
-                              <option value="venmo">Venmo</option>
-                              <option value="cash">Cash</option>
-                              <option value="check">Check</option>
-                              <option value="card">Card</option>
-                              <option value="other">Other</option>
-                            </select>
-                            <button className="btn btn-sm">Mark paid</button>
-                          </form>
-                          <form action={sendPaymentReminder}>
-                            <input type="hidden" name="id" value={p.id} />
-                            <button className="btn-secondary btn-sm" title="Email the tenant a reminder">
-                              Remind
-                            </button>
-                          </form>
-                          <form action={deletePayment}>
-                            <input type="hidden" name="id" value={p.id} />
-                            <button className="btn-secondary btn-sm" title="Delete unpaid payment">✕</button>
-                          </form>
-                        </div>
-                      )}
+                      <PaymentActions payment={p} />
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       )}
+
+      <details className="card mt-6 p-5">
+        <summary className="cursor-pointer font-semibold">Send month-end receipts</summary>
+        <p className="mt-2 text-xs text-ink-500">
+          Emails each tenant an itemized receipt for what they actually paid.
+          {methods ? ` Your accepted methods are ${methods}.` : " Add your payment methods in Settings."}
+        </p>
+        <form action={sendMonthlyReceipts} className="mt-3 flex flex-wrap items-end gap-2">
+          <div>
+            <label className="label">Month</label>
+            <input name="month" type="month" defaultValue={month} className="input w-48" />
+          </div>
+          <button className="btn">Send receipts</button>
+        </form>
+      </details>
     </>
   );
 }

@@ -1,4 +1,3 @@
-import { createProperty } from "@/lib/actions";
 import PropertyForm from "@/components/PropertyForm";
 import { BackLink, PageHeader } from "@/components/ui";
 
@@ -8,8 +7,8 @@ export default function NewPropertyPage() {
   return (
     <>
       <BackLink href="/properties" label="Properties" />
-      <PageHeader title="Add property" subtitle="Rentals, listings, and applications all hang off a property." />
-      <PropertyForm action={createProperty} submitLabel="Create property" />
+      <PageHeader title="Add property" subtitle="Start with the address and rent. Optional details can wait." />
+      <PropertyForm />
     </>
   );
 }

@@ -1,7 +1,69 @@
-import { addRooms, assignRoomTenant, deleteUnit, updateUnit } from "@/lib/actions";
+"use client";
+
+import { addRooms, assignRoomTenant, autosaveUnit, deleteUnit } from "@/lib/actions";
+import AutosaveStatus from "@/components/AutosaveStatus";
 import { money } from "@/lib/format";
+import { useAutosaveForm } from "@/lib/useAutosaveForm";
 import { Badge } from "@/components/ui";
 import type { Person, Property, Unit } from "@/lib/types";
+
+function RoomEditor({ propertyId, room }: { propertyId: string; room: Unit }) {
+  const { formRef, state, saveNow, formEvents } = useAutosaveForm({
+    action: autosaveUnit,
+    initialId: room.id,
+  });
+  const fieldId = (name: string) => `room-${room.id}-${name}`;
+
+  return (
+    <form ref={formRef} {...formEvents} className="grid items-end gap-3 sm:grid-cols-12">
+      <input type="hidden" name="id" value={room.id} />
+      <input type="hidden" name="property_id" value={propertyId} />
+
+      <div className="sm:col-span-4">
+        <label htmlFor={fieldId("name")} className="label">Room name</label>
+        <input id={fieldId("name")} name="name" defaultValue={room.name} className="input" />
+      </div>
+      <div className="sm:col-span-2">
+        <label htmlFor={fieldId("rent")} className="label">Rent ($)</label>
+        <input id={fieldId("rent")} name="rent" type="number" min="0" step="1" defaultValue={room.rent} className="input" />
+      </div>
+      <div className="sm:col-span-2">
+        <label htmlFor={fieldId("deposit")} className="label">Deposit ($)</label>
+        <input id={fieldId("deposit")} name="deposit" type="number" min="0" step="1" defaultValue={room.deposit} className="input" />
+      </div>
+      <div className="sm:col-span-2">
+        <label htmlFor={fieldId("size")} className="label">Sq ft</label>
+        <input id={fieldId("size")} name="size_sqft" type="number" min="0" step="1" defaultValue={room.size_sqft} className="input" />
+      </div>
+      <div className="flex flex-col items-start gap-1 sm:col-span-2">
+        <Badge value={room.status} />
+        <AutosaveStatus state={state} retry={() => void saveNow()} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4 sm:col-span-12">
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" name="private_bath" defaultChecked={!!room.private_bath} className="h-4 w-4 rounded border-slate-300" />
+          Private bathroom
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" name="furnished" defaultChecked={!!room.furnished} className="h-4 w-4 rounded border-slate-300" />
+          Furnished
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" name="listed" defaultChecked={!!room.listed} className="h-4 w-4 rounded border-slate-300" />
+          Advertise when vacant
+        </label>
+        <input
+          name="description"
+          aria-label={`${room.name} listing notes`}
+          defaultValue={room.description}
+          className="input h-8 min-w-40 flex-1 py-1 text-xs"
+          placeholder="Notes for the listing (optional)"
+        />
+      </div>
+    </form>
+  );
+}
 
 /**
  * Room-by-room management for a property: rent, deposit, who lives there,
@@ -40,61 +102,9 @@ export default function RoomsPanel({
         <ul className="divide-y divide-slate-100">
           {rooms.map((room) => (
             <li key={room.id} className="px-5 py-4">
-              <form action={updateUnit} className="grid items-end gap-3 sm:grid-cols-12">
-                <input type="hidden" name="id" value={room.id} />
-                <input type="hidden" name="property_id" value={property.id} />
-
-                <div className="sm:col-span-3">
-                  <label className="label">Room name</label>
-                  <input name="name" defaultValue={room.name} className="input" />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="label">Rent ($)</label>
-                  <input name="rent" type="number" min="0" step="1" defaultValue={room.rent} className="input" />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="label">Deposit ($)</label>
-                  <input name="deposit" type="number" min="0" step="1" defaultValue={room.deposit} className="input" />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="label">Sq ft</label>
-                  <input name="size_sqft" type="number" min="0" step="1" defaultValue={room.size_sqft} className="input" />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="label">Status</label>
-                  <select name="status" defaultValue={room.status} className="input">
-                    <option value="vacant">Vacant</option>
-                    <option value="occupied">Occupied</option>
-                  </select>
-                </div>
-                <div className="sm:col-span-1">
-                  <button className="btn btn-sm w-full justify-center">Save</button>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-4 sm:col-span-12">
-                  <label className="flex items-center gap-2 text-xs">
-                    <input type="checkbox" name="private_bath" defaultChecked={!!room.private_bath} className="h-4 w-4 rounded border-slate-300" />
-                    Private bathroom
-                  </label>
-                  <label className="flex items-center gap-2 text-xs">
-                    <input type="checkbox" name="furnished" defaultChecked={!!room.furnished} className="h-4 w-4 rounded border-slate-300" />
-                    Furnished
-                  </label>
-                  <label className="flex items-center gap-2 text-xs">
-                    <input type="checkbox" name="listed" defaultChecked={!!room.listed} className="h-4 w-4 rounded border-slate-300" />
-                    Advertise when vacant
-                  </label>
-                  <input
-                    name="description"
-                    defaultValue={room.description}
-                    className="input h-8 min-w-40 flex-1 py-1 text-xs"
-                    placeholder="Notes for the listing (optional)"
-                  />
-                </div>
-              </form>
+              <RoomEditor propertyId={property.id} room={room} />
 
               <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
-                <Badge value={room.status} />
                 <form action={assignRoomTenant} className="flex items-center gap-2">
                   <input type="hidden" name="unit_id" value={room.id} />
                   <input type="hidden" name="property_id" value={property.id} />

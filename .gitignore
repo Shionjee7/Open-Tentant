@@ -5,6 +5,10 @@ node_modules/
 .next/
 out/
 
+# browser tests
+test-results/
+playwright-report/
+
 # production
 build/
 

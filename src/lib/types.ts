@@ -28,6 +28,7 @@ export type Property = {
   amenities: string;
   /** "whole" = rent the entire place; "by_room" = rent each room separately. */
   rental_type: "whole" | "by_room";
+  archived: boolean;
   created: string;
   room_count?: number;
   rooms_vacant?: number;
@@ -66,6 +67,7 @@ export type Person = {
   unit: Id | "";
   notes: string;
   portal_token: string;
+  archived: boolean;
   created: string;
   property_name?: string;
   unit_name?: string;
@@ -167,6 +169,7 @@ export type Txn = {
   amount: number;
   description: string;
   payment: Id | "";
+  bank_import: Id | "";
   created: string;
   property_name?: string;
 };
@@ -269,6 +272,7 @@ export type BankImport = {
   payment: Id | "";
   person: Id | "";
   fingerprint: string;
+  hidden: boolean;
   created: string;
   account_name?: string;
   matched_tenant?: string;

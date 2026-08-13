@@ -21,7 +21,7 @@ export default function RentalTypeFields({
   const [type, setType] = useState(defaultType === "by_room" ? "by_room" : "whole");
 
   return (
-    <div className="rounded-lg border border-slate-200 p-4">
+    <div>
       <div className="label">How is this rented?</div>
       <div className="grid gap-3 sm:grid-cols-2">
         {[
@@ -53,12 +53,12 @@ export default function RentalTypeFields({
       {type === "whole" ? (
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="label">Monthly rent ($)</label>
-            <input name="rent" type="number" step="1" min="0" defaultValue={defaultRent || ""} className="input" />
+            <label className="label" htmlFor="property-rent">Monthly rent ($)</label>
+            <input id="property-rent" name="rent" type="number" step="1" min="0" defaultValue={defaultRent || ""} className="input" />
           </div>
           <div>
-            <label className="label">Security deposit ($)</label>
-            <input name="deposit" type="number" step="1" min="0" defaultValue={defaultDeposit || ""} className="input" />
+            <label className="label" htmlFor="property-deposit">Security deposit ($)</label>
+            <input id="property-deposit" name="deposit" type="number" step="1" min="0" defaultValue={defaultDeposit || ""} className="input" />
           </div>
         </div>
       ) : (
@@ -71,13 +71,13 @@ export default function RentalTypeFields({
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="label">How many rooms?</label>
-                <input name="room_count" type="number" step="1" min="1" max="20" defaultValue="4" className="input" />
+                <label className="label" htmlFor="property-room-count">How many rooms?</label>
+                <input id="property-room-count" name="room_count" type="number" step="1" min="1" max="20" defaultValue="4" className="input" />
                 <p className="mt-1 text-xs text-ink-500">Rooms are created for you — rename them any time.</p>
               </div>
               <div>
-                <label className="label">Rent per room ($/mo)</label>
-                <input name="room_rent" type="number" step="1" min="0" className="input" placeholder="750" />
+                <label className="label" htmlFor="property-room-rent">Rent per room ($/mo)</label>
+                <input id="property-room-rent" name="room_rent" type="number" step="1" min="0" className="input" placeholder="750" />
                 <p className="mt-1 text-xs text-ink-500">Set once now, adjust per room later.</p>
               </div>
             </div>
