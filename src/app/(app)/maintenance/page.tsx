@@ -4,7 +4,7 @@ import { setMaintenanceStatus } from "@/lib/actions";
 import { shortDate } from "@/lib/format";
 import { Badge, EmptyState, PageHeader } from "@/components/ui";
 
-export const metadata = { title: "Maintenance" };
+export const metadata = { title: "Repairs" };
 
 const NEXT: Record<string, { status: string; label: string }[]> = {
   new: [{ status: "in_progress", label: "Start" }, { status: "cancelled", label: "Cancel" }],
@@ -18,7 +18,7 @@ export default async function MaintenancePage() {
   return (
     <>
       <PageHeader
-        title="Maintenance"
+        title="Repairs"
         subtitle="Track repair requests from new to done, with priorities."
         action={<Link href="/maintenance/new" className="btn">+ New request</Link>}
       />

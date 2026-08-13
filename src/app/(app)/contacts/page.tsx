@@ -4,7 +4,7 @@ import { createPerson, moveOutTenant, sendPortalInvite, setPersonStage } from "@
 import { shortDate } from "@/lib/format";
 import { Badge, EmptyState, PageHeader } from "@/components/ui";
 
-export const metadata = { title: "Leads & Tenants" };
+export const metadata = { title: "Tenants" };
 
 const STAGES: { key: string; label: string }[] = [
   { key: "lead", label: "Leads" },
@@ -34,7 +34,7 @@ export default async function ContactsPage({
   return (
     <>
       <PageHeader
-        title="Leads & Tenants"
+        title="Tenants"
         subtitle="Track everyone from first inquiry to move-out — leads, applicants, active tenants, and past tenants."
       />
 

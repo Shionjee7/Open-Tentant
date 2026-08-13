@@ -26,7 +26,7 @@ export default async function AccountingPage() {
   return (
     <>
       <PageHeader
-        title="Accounting & Insights"
+        title="Accounting"
         subtitle="Every payment you approve books itself as income automatically — add expenses to see true profit."
       />
 

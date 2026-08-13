@@ -4,7 +4,7 @@ import { createDocument, setDocumentStatus } from "@/lib/actions";
 import { shortDate, titleCase } from "@/lib/format";
 import { Badge, PageHeader } from "@/components/ui";
 
-export const metadata = { title: "Documents & E-Sign" };
+export const metadata = { title: "Documents" };
 
 const NEXT: Record<string, { status: string; label: string }[]> = {
   draft: [{ status: "sent", label: "Mark sent" }],
@@ -22,7 +22,7 @@ export default async function DocumentsPage() {
   return (
     <>
       <PageHeader
-        title="Documents & E-Sign"
+        title="Documents"
         subtitle="Track leases, addenda, and notices through draft → sent → signed. Signing runs through free open-source e-sign tools."
       />
 

@@ -46,7 +46,7 @@ export default async function DashboardPage() {
   return (
     <>
       <PageHeader
-        title="Dashboard"
+        title="Home"
         subtitle="Your portfolio at a glance."
         action={
           <div className="flex gap-2">

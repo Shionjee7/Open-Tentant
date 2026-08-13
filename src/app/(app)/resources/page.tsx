@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/ui";
 
-export const metadata = { title: "Resources" };
+export const metadata = { title: "How-to guides" };
 
 const GUIDES: { title: string; body: React.ReactNode }[] = [
   {
@@ -9,14 +9,14 @@ const GUIDES: { title: string; body: React.ReactNode }[] = [
       <>
         <p>
           OpenTenant follows the full landlord workflow: <strong>Property → Listing → Leads →
-          Application → Screening → Lease → Payments → Maintenance → Accounting</strong>.
+          Application → Screening → Lease → Rent → Repairs → Accounting</strong>.
         </p>
         <ol className="mt-2 list-decimal space-y-1 pl-5">
           <li>Add a property and tick <em>Publish on the public listings page</em>.</li>
           <li>Share <code>/listings</code> — prospects browse and apply online (your custom questions included).</li>
           <li>Applications arrive under <em>Applications</em>; verify income, run screening, approve or deny.</li>
           <li>Approving moves the applicant to <em>Tenants</em>. Create a lease, send it for e-signature, activate it.</li>
-          <li>Schedule 12 months of rent in <em>Payments</em>. Share the tenant&apos;s portal link from <em>Leads &amp; Tenants</em>.</li>
+          <li>Schedule 12 months of rent in <em>Rent</em>. Share the tenant&apos;s portal link from <em>Tenants</em>.</li>
           <li>Tenants report payments and maintenance from their portal; you approve with one click.</li>
         </ol>
       </>
@@ -88,7 +88,7 @@ const GUIDES: { title: string; body: React.ReactNode }[] = [
         </p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
           <li>Put your Zelle/Venmo/ACH details or a payment link in <em>Settings → Payment instructions</em> — they appear in every tenant portal.</li>
-          <li>Schedule rent months ahead (<em>Payments → Record/schedule → repeat 12 months</em>) so past-due tracking is automatic.</li>
+          <li>Schedule rent months ahead (<em>Rent → Record/schedule → repeat 12 months</em>) so past-due tracking is automatic.</li>
           <li>Tenants hit <em>“I paid this”</em> in their portal with method, date, and confirmation number; you <em>Approve</em>, and the income books itself.</li>
           <li>Cash or check in hand? Use <em>Mark paid</em> directly.</li>
         </ul>
@@ -100,7 +100,7 @@ const GUIDES: { title: string; body: React.ReactNode }[] = [
     body: (
       <>
         <p>
-          <em>Banking &amp; Deposits</em> reconciles what actually hit your account against what tenants owe.
+          <em>Bank deposits</em> reconciles what actually hit your account against what tenants owe.
         </p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
           <li>Record which account each property&apos;s rent lands in (nickname and last four digits only — never full account numbers).</li>
@@ -186,7 +186,7 @@ export default function ResourcesPage() {
   return (
     <>
       <PageHeader
-        title="Resources"
+        title="How-to guides"
         subtitle="How to run your rentals with OpenTenant — screening, rent collection, room rentals, and reconciliation."
       />
       <div className="max-w-3xl space-y-5">

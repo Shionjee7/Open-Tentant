@@ -18,7 +18,7 @@ import { matchScore } from "@/lib/statements";
 import { moneyExact, shortDate, titleCase } from "@/lib/format";
 import { Badge, PageHeader, StatCard } from "@/components/ui";
 
-export const metadata = { title: "Banking & deposits" };
+export const metadata = { title: "Bank deposits" };
 
 const KINDS = [
   ["bank", "Bank account"],
@@ -48,7 +48,7 @@ export default async function BankingPage({
   return (
     <>
       <PageHeader
-        title="Banking & deposits"
+        title="Bank deposits"
         subtitle="Track which account each property's rent lands in, then import a statement and assign each deposit to the tenant who paid."
       />
 

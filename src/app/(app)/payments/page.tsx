@@ -12,7 +12,7 @@ import {
 import { money, moneyExact, shortDate, titleCase } from "@/lib/format";
 import { Badge, EmptyState, PageHeader, StatCard } from "@/components/ui";
 
-export const metadata = { title: "Payments" };
+export const metadata = { title: "Rent" };
 
 export default async function PaymentsPage({
   searchParams,
@@ -29,7 +29,7 @@ export default async function PaymentsPage({
   return (
     <>
       <PageHeader
-        title="Payments"
+        title="Rent"
         subtitle={
           methods
             ? `Accepted methods: ${methods}. Change them in Settings.`

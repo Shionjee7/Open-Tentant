@@ -93,7 +93,7 @@ export default async function SigningPanel({
           {missingEmails.length > 0 && (
             <p className="mt-1 text-xs text-amber-700">
               {missingEmails.map((t) => `${t.first_name} ${t.last_name}`).join(", ")} has no email
-              address — add one under Leads &amp; Tenants so OpenSign can reach them.
+              address — add one under Tenants so OpenSign can reach them.
             </p>
           )}
 

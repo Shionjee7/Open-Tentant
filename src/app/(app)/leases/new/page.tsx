@@ -45,7 +45,7 @@ export default async function NewLeasePage() {
           <label className="label">Tenants ({people.length === 0 ? "add tenants or applicants first" : "select all that apply"})</label>
           <div className="grid gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-2">
             {people.length === 0 ? (
-              <p className="text-sm text-ink-500">No tenants or applicants yet — add them under Leads &amp; Tenants.</p>
+              <p className="text-sm text-ink-500">No tenants or applicants yet — add them under Tenants.</p>
             ) : (
               people.map((p) => (
                 <label key={p.id} className="flex items-center gap-2 text-sm">

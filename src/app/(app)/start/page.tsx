@@ -59,7 +59,7 @@ export default async function StartPage() {
     {
       done: people.length > 0,
       title: "Add your tenant",
-      body: "Add whoever lives there under Leads & Tenants, with their email so the app can reach them. For a by-the-room property, assign them to a room on the property page.",
+      body: "Add whoever lives there under Tenants, with their email so the app can reach them. For a by-the-room property, assign them to a room on the property page.",
       href: "/contacts?stage=tenant",
       cta: "Add a tenant",
       detail: people.length > 0 ? `${stages.tenant ?? 0} tenants · ${stages.lead ?? 0} leads` : undefined,
@@ -83,7 +83,7 @@ export default async function StartPage() {
     {
       done: tenantsWithPortal.length > 0 && Boolean(smtpHost),
       title: "Give your tenant their portal",
-      body: "Each tenant gets a private link showing what they owe, where they can tap “I paid this”. You approve it, and it books itself. Email them the link from Leads & Tenants.",
+      body: "Each tenant gets a private link showing what they owe, where they can tap “I paid this”. You approve it, and it books itself. Email them the link from Tenants.",
       href: "/contacts?stage=tenant",
       cta: "Send portal links",
       detail: smtpHost ? undefined : "Connect your email in Settings first, so links can be sent",
@@ -154,7 +154,7 @@ export default async function StartPage() {
             deposit to the tenant who paid, and skips anything you already recorded so nothing counts twice.
           </li>
           <li>
-            <strong>Send receipts.</strong> One button on the Payments page emails every tenant a receipt for
+            <strong>Send receipts.</strong> One button on the Rent page emails every tenant a receipt for
             what they paid that month.
           </li>
           <li>
