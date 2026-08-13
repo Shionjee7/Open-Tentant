@@ -33,12 +33,12 @@ so you can never get lost.
 | **E-signatures, built in** | Emails each signer a private link; they read the lease, consent, and sign by typing or drawing their name. Full audit trail — consent text, IP, timestamp, and a SHA-256 of the terms signed — printed as a certificate of completion. Unlimited, no per-document fee, no second service |
 | **Signing app (optional)** | `npm run esign` starts [OpenSign](https://www.opensignlabs.com) next to OpenTenant and shows it inside the app, for signing documents that aren't leases |
 | **Rent** | Schedule rent up to 24 months ahead, accept any method (Zelle, ACH, card, cash, check), automatic past-due tracking |
-| **Bank deposits** | Record which account each property's rent lands in, **import bank/Zelle/Cash App statements**, and assign each deposit to the tenant who paid — auto-suggested by amount, name, and due date, with anything you already recorded parked aside so nothing counts twice |
+| **Bank deposits** | Import bank/Zelle/Cash App statements. The app works out **which account** the statement came from, assigns each deposit to the tenant who paid, sorts withdrawals into **expense categories** (electric, mortgage, insurance…), and **asks** rather than guessing when something looks like money already on the books |
 | **Tenant portal** | Private per-tenant link: balance due, **"I paid this"** reporting (you approve), payment history, maintenance requests |
 | **Repairs** | Requests with priority and status workflow, from tenants or you |
 | **Documents** | Track leases, addenda, and notices from draft → sent → signed |
 | **Condition reports** | 12-area move-in/move-out checklists that lock when completed |
-| **Accounting** | Approved payments auto-book as income; expenses by category; income-vs-expense chart; money kept; and 1–5 year projections from your current leases |
+| **Accounting** | **Per property**: what each house earns after its own costs, per month, per year, and over 5 years, with a portfolio total. **Per bank**: what each account holds, carried forward from a balance you set. Plus expenses by category and an income-vs-expense chart |
 | **Email notifications** | Connect Gmail (or any SMTP) and the app confirms applications, alerts you to new ones, sends approval/denial notices, rent reminders, portal invites, maintenance updates, and **month-end rent receipts** with your business name and address |
 | **How-to guides** | Built-in guides for screening, rent collection, room rentals, and reconciliation |
 

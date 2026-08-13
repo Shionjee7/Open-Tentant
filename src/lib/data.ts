@@ -538,18 +538,24 @@ export async function listBankAccounts(): Promise<BankAccount[]> {
 }
 
 export async function listBankImports(status?: string): Promise<BankImport[]> {
-  const [imports, accounts, people] = await Promise.all([
+  const [imports, accounts, people, payments] = await Promise.all([
     fetchAll<BankImport>("bank_imports", { sort: "-posted_date" }),
     fetchAll<BankAccount>("bank_accounts"),
     fetchAll<Person>("people"),
+    fetchAll<Payment>("payments"),
   ]);
   const accountMap = byId(accounts);
   const peopleMap = byId(people);
-  const decorated = imports.map((deposit) => ({
-    ...deposit,
-    account_name: deposit.account ? accountMap.get(deposit.account)?.name : undefined,
-    matched_tenant: deposit.person ? fullName(peopleMap.get(deposit.person)) : undefined,
-  }));
+  const paymentMap = byId(payments);
+  const decorated = imports.map((deposit) => {
+    const payment = deposit.payment ? paymentMap.get(deposit.payment) : undefined;
+    return {
+      ...deposit,
+      account_name: deposit.account ? accountMap.get(deposit.account)?.name : undefined,
+      matched_tenant: deposit.person ? fullName(peopleMap.get(deposit.person)) : undefined,
+      matched_payment_date: payment?.paid_date || payment?.due_date || undefined,
+    };
+  });
   return status ? decorated.filter((d) => d.status === status) : decorated;
 }
 

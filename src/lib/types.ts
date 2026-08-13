@@ -254,11 +254,24 @@ export type BankImport = {
   description: string;
   amount: number;
   source: string;
-  status: "unmatched" | "matched" | "ignored";
+  /**
+   * `already_recorded` is a question waiting on the landlord — it looks like
+   * money already on the books. `expense_review` is a withdrawal waiting to be
+   * categorised; `expense_booked` once it has been.
+   */
+  status:
+    | "unmatched"
+    | "matched"
+    | "ignored"
+    | "already_recorded"
+    | "expense_review"
+    | "expense_booked";
   payment: Id | "";
   person: Id | "";
   fingerprint: string;
   created: string;
   account_name?: string;
   matched_tenant?: string;
+  /** When the payment we think this duplicates was recorded. */
+  matched_payment_date?: string;
 };

@@ -19,6 +19,7 @@ import {
   getSetting,
   getSignatureByToken,
   leaseTenantIds,
+  listBankAccounts,
   listSignatures,
   listAllUnits,
   listPayments,
@@ -28,7 +29,7 @@ import {
   setSetting,
 } from "./data";
 import { seedDemoData } from "./seed";
-import { fingerprint, matchScore, parseStatement } from "./statements";
+import { detectAccount, fingerprint, matchScore, parseStatement } from "./statements";
 import { createSignatureRequest, fetchDocumentStatus, hasApiAccess } from "./opensign";
 import { sendEmail, sendEmailQuietly, smtpConfig, templates } from "./email";
 import type { Id } from "./types";
@@ -1181,7 +1182,6 @@ export async function deleteBankAccount(form: FormData) {
 }
 
 export async function importStatement(form: FormData) {
-  const accountId = rel(form, "account_id");
   const source = s(form, "source") || "bank";
   const depositsOnly = flag(form, "deposits_only");
 
@@ -1196,6 +1196,27 @@ export async function importStatement(form: FormData) {
   if (rows.length === 0) redirect("/banking?error=unparsed");
 
   const client = await pb();
+
+  // Which account is this? Told, or worked out from the statement itself.
+  let accountId = rel(form, "account_id");
+  let detected = "";
+  if (!accountId) {
+    const accounts = await listBankAccounts();
+    const guess = detectAccount(
+      text,
+      accounts.map((a) => ({
+        id: a.id,
+        name: a.name,
+        institution: a.institution,
+        last4: a.last4,
+      }))
+    );
+    if (guess) {
+      accountId = guess.id;
+      const account = accounts.find((a) => a.id === guess.id);
+      detected = `${account?.name ?? "an account"} — ${guess.reason}`;
+    }
+  }
   const existing = await client.collection("bank_imports").getFullList({ perPage: 1000 });
   const seen = new Set(existing.map((deposit) => deposit.fingerprint).filter(Boolean));
 
@@ -1210,8 +1231,10 @@ export async function importStatement(form: FormData) {
   let imported = 0;
   let skipped = 0;
   let alreadyRecorded = 0;
+  let expenses = 0;
 
   for (const row of rows) {
+    const isWithdrawal = row.amount < 0;
     if (depositsOnly && row.amount <= 0) {
       skipped++;
       continue;
@@ -1219,6 +1242,24 @@ export async function importStatement(form: FormData) {
     const print = fingerprint(accountId || "none", row);
     if (seen.has(print)) {
       skipped++;
+      continue;
+    }
+
+    // Money going out isn't rent — it's a bill. It goes to its own queue with
+    // a category guessed from the description.
+    if (isWithdrawal) {
+      await client.collection("bank_imports").create({
+        account: accountId,
+        posted_date: row.posted_date,
+        description: row.description,
+        amount: row.amount,
+        source,
+        status: "expense_review",
+        fingerprint: print,
+      });
+      seen.add(print);
+      imported++;
+      expenses++;
       continue;
     }
 
@@ -1249,7 +1290,59 @@ export async function importStatement(form: FormData) {
   }
 
   refresh();
-  redirect(`/banking?imported=${imported}&skipped=${skipped}&duplicates=${alreadyRecorded}`);
+  const params = new URLSearchParams({
+    imported: String(imported),
+    skipped: String(skipped),
+    duplicates: String(alreadyRecorded),
+    expenses: String(expenses),
+  });
+  if (detected) params.set("account", detected);
+  redirect(`/banking?${params}`);
+}
+
+/**
+ * Books a withdrawal as an expense.
+ *
+ * The category comes from the dropdown, pre-filled with our guess; the
+ * property comes from whichever account the statement belongs to, so a bill
+ * paid from the Maple Street account lands against Maple Street.
+ */
+export async function bookImportAsExpense(form: FormData) {
+  const client = await pb();
+  const importId = s(form, "id");
+  const deposit = await client.collection("bank_imports").getOne(importId).catch(() => null);
+  if (!deposit) return;
+
+  let propertyId = rel(form, "property_id");
+  if (!propertyId && deposit.account) {
+    const account = await client.collection("bank_accounts").getOne(deposit.account).catch(() => null);
+    propertyId = account?.property ?? "";
+  }
+
+  await client.collection("transactions").create({
+    property: propertyId,
+    date: deposit.posted_date,
+    type: "expense",
+    category: s(form, "category") || "other",
+    amount: Math.abs(deposit.amount),
+    description: deposit.description,
+  });
+  await client.collection("bank_imports").update(importId, { status: "expense_booked" });
+  refresh();
+  redirect("/banking");
+}
+
+/**
+ * "Yes, that's the same money."
+ *
+ * Confirms a suspected duplicate so it stops asking. Nothing is booked — the
+ * payment was already recorded, which is the whole point.
+ */
+export async function confirmDuplicate(form: FormData) {
+  const client = await pb();
+  await client.collection("bank_imports").update(s(form, "id"), { status: "matched" });
+  refresh();
+  redirect("/banking");
 }
 
 export async function matchImport(form: FormData) {

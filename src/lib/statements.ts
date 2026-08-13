@@ -166,7 +166,12 @@ function parseFreeText(lines: string[]): ParsedRow[] {
     if (!date) continue;
 
     // The last money-looking token on the line is the amount.
-    const amounts = [...trimmed.matchAll(/\(?-?\$?\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})\)?/g)];
+    //
+    // The integer part is `\d[\d,]*` rather than `\d{1,3}(,\d{3})*` on purpose:
+    // plenty of exports print 1234.00 with no thousands separator, and a
+    // three-digit cap silently turned that into 234.00 — a wrong number that
+    // looks perfectly plausible in the books.
+    const amounts = [...trimmed.matchAll(/\(?-?\$?\s?\d[\d,]*\.\d{2}\)?/g)];
     if (amounts.length === 0) continue;
     const last = amounts[amounts.length - 1];
     const amount = parseAmount(last[0]);
@@ -185,9 +190,14 @@ export function parseStatement(text: string): ParsedRow[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length === 0) return [];
 
-  const looksDelimited = /[,\t]/.test(lines[0]);
-  if (looksDelimited) {
-    const parsed = parseDelimited(lines);
+  // Real exports rarely start with the header row — the bank's name, the
+  // account number, and the statement period usually come first. So look for
+  // the header rather than assuming line one, and take the first position that
+  // yields actual rows.
+  const searchDepth = Math.min(lines.length, 15);
+  for (let start = 0; start < searchDepth; start++) {
+    if (!/[,\t]/.test(lines[start])) continue;
+    const parsed = parseDelimited(lines.slice(start));
     if (parsed && parsed.length > 0) return parsed;
   }
   return parseFreeText(lines);
@@ -197,6 +207,95 @@ export function parseStatement(text: string): ParsedRow[] {
 export function fingerprint(accountId: string, row: ParsedRow): string {
   const normalized = row.description.toLowerCase().replace(/\s+/g, " ").trim();
   return `${accountId}|${row.posted_date}|${row.amount.toFixed(2)}|${normalized}`;
+}
+
+/**
+ * Which account did this statement come from?
+ *
+ * A landlord with one bank per house shouldn't have to remember which is
+ * which. Statements name themselves: the last four digits appear next to the
+ * account number, and the bank's own name is usually in the header. We read
+ * both and say what we concluded, so a wrong guess is visible rather than
+ * silent.
+ */
+export type AccountHint = {
+  id: string;
+  name: string;
+  institution: string;
+  last4: string;
+};
+
+export type AccountGuess = {
+  id: string;
+  /** Plain English, shown to the landlord: "matched ····4821 in the statement". */
+  reason: string;
+  score: number;
+};
+
+export function detectAccount(text: string, accounts: AccountHint[]): AccountGuess | null {
+  const haystack = text.toLowerCase().slice(0, 20000);
+  // Digit runs that a statement would print for an account number: masked
+  // (****4821, xxxx4821, ···4821) or the tail of a longer number.
+  const masked = [...haystack.matchAll(/[*x·•#-]{2,}\s?(\d{4})\b/g)].map((m) => m[1]);
+  const afterLabel = [...haystack.matchAll(/account[^0-9]{0,20}(\d{4})\b/g)].map((m) => m[1]);
+  const digits = new Set([...masked, ...afterLabel]);
+
+  const guesses = accounts
+    .map((account) => {
+      let score = 0;
+      const reasons: string[] = [];
+
+      if (account.last4 && digits.has(account.last4)) {
+        score += 60;
+        reasons.push(`the statement shows ····${account.last4}`);
+      }
+      if (account.institution && account.institution.trim().length > 2) {
+        const bank = account.institution.toLowerCase().trim();
+        if (haystack.includes(bank)) {
+          score += 30;
+          reasons.push(`it names ${account.institution}`);
+        }
+      }
+      if (account.name && account.name.trim().length > 3 && haystack.includes(account.name.toLowerCase())) {
+        score += 15;
+        reasons.push(`it names "${account.name}"`);
+      }
+
+      return { id: account.id, score, reason: reasons.join(" and ") };
+    })
+    .filter((g) => g.score >= 30)
+    .sort((a, b) => b.score - a.score);
+
+  if (guesses.length === 0) return null;
+  // Two accounts fitting equally well is not a guess worth making.
+  if (guesses.length > 1 && guesses[0].score === guesses[1].score) return null;
+  return guesses[0];
+}
+
+/**
+ * What kind of expense does this withdrawal look like?
+ *
+ * Bank descriptions are terse but consistent — "DUKE ENERGY", "HOME DEPOT",
+ * "STATE FARM". Matching them to a category turns a statement into bookkeeping
+ * instead of a list of mystery debits. It's a suggestion: the category sits in
+ * a dropdown the landlord can change before booking it.
+ */
+const CATEGORY_HINTS: [string, RegExp][] = [
+  ["utilities", /\b(electric|energy|power|duke|aep|con\s?ed|pg&?e|gas co|natural gas|water|sewer|utility|utilities|waste|trash|refuse|internet|comcast|xfinity|spectrum|at&?t|verizon)\b/],
+  ["mortgage", /\b(mortgage|loan pmt|loan payment|escrow|rocket mortgage|freedom mtg|mr cooper|wells fargo home)\b/],
+  ["insurance", /\b(insurance|insur|state farm|allstate|geico|progressive|liberty mutual|nationwide)\b/],
+  ["taxes", /\b(tax|treasurer|county of|irs|dept of revenue)\b/],
+  ["repairs", /\b(home depot|lowe'?s|menards|ace hardware|plumb|hvac|roof|electric(ian)?|handyman|repair|contractor|sherwin|grainger)\b/],
+  ["turnover", /\b(clean|carpet|paint|junk removal|dumpster|locksmith|turnover)\b/],
+  ["software", /\b(software|subscription|saas|google|microsoft|adobe|zoom|godaddy|namecheap)\b/],
+];
+
+export function suggestCategory(description: string): string {
+  const text = description.toLowerCase();
+  for (const [category, pattern] of CATEGORY_HINTS) {
+    if (pattern.test(text)) return category;
+  }
+  return "other";
 }
 
 /**

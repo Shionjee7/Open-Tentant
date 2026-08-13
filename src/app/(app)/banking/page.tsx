@@ -6,8 +6,10 @@ import {
   openPayments,
 } from "@/lib/data";
 import {
+  bookImportAsExpense,
   bookImportAsIncome,
   clearImports,
+  confirmDuplicate,
   createBankAccount,
   deleteBankAccount,
   ignoreImport,
@@ -16,11 +18,23 @@ import {
   setAccountBalance,
   unignoreImport,
 } from "@/lib/actions";
-import { matchScore } from "@/lib/statements";
+import { matchScore, suggestCategory } from "@/lib/statements";
 import { moneyExact, shortDate, titleCase } from "@/lib/format";
 import { Badge, PageHeader, StatCard } from "@/components/ui";
 
 export const metadata = { title: "Bank deposits" };
+
+/** Same list the manual expense form offers, so the books stay consistent. */
+const EXPENSE_CATEGORIES: [string, string][] = [
+  ["repairs", "Repairs"],
+  ["utilities", "Utilities"],
+  ["insurance", "Insurance"],
+  ["taxes", "Taxes"],
+  ["mortgage", "Mortgage"],
+  ["turnover", "Turnover"],
+  ["software", "Software"],
+  ["other", "Other"],
+];
 
 const KINDS = [
   ["bank", "Bank account"],
@@ -34,9 +48,16 @@ const KINDS = [
 export default async function BankingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ imported?: string; skipped?: string; error?: string; duplicates?: string }>;
+  searchParams: Promise<{
+    imported?: string;
+    skipped?: string;
+    error?: string;
+    duplicates?: string;
+    expenses?: string;
+    account?: string;
+  }>;
 }) {
-  const { imported, skipped, error, duplicates } = await searchParams;
+  const { imported, skipped, error, duplicates, expenses, account } = await searchParams;
   const accounts = await listBankAccounts();
   const balances = await accountBalances();
   const today = new Date().toISOString().slice(0, 10);
@@ -45,6 +66,7 @@ export default async function BankingPage({
   const matched = await listBankImports("matched");
   const ignored = await listBankImports("ignored");
   const alreadyRecorded = await listBankImports("already_recorded");
+  const expenseReview = await listBankImports("expense_review");
   const candidates = await openPayments();
 
   const unmatchedTotal = unmatched.reduce((sum, d) => sum + d.amount, 0);
@@ -67,10 +89,17 @@ export default async function BankingPage({
             "Couldn't find any transactions in that. Export as CSV from your bank, or paste lines that include a date and an amount."}
           {imported && (
             <>
-              Imported <strong>{imported}</strong> deposit{imported === "1" ? "" : "s"}
-              {skipped && Number(skipped) > 0 && ` · skipped ${skipped} (already imported, or not a deposit)`}
+              Imported <strong>{imported}</strong> transaction{imported === "1" ? "" : "s"}
+              {expenses && Number(expenses) > 0 && ` · ${expenses} of them money going out`}
+              {skipped && Number(skipped) > 0 && ` · skipped ${skipped} (already imported)`}
               {duplicates && Number(duplicates) > 0 &&
-                ` · ${duplicates} already recorded, so they won't be counted twice`}.
+                ` · ${duplicates} look like money already on the books, so we've asked below`}.
+              {account && (
+                <div className="mt-1">
+                  Filed under <strong>{account.split(" — ")[0]}</strong> — {account.split(" — ")[1]}.
+                  Wrong? Pick the account by hand next time.
+                </div>
+              )}
             </>
           )}
         </div>
@@ -84,40 +113,128 @@ export default async function BankingPage({
       </div>
 
       {alreadyRecorded.length > 0 && (
-        <section className="card mb-6 border-slate-200">
-          <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
-            <h2 className="font-semibold">Already recorded ({alreadyRecorded.length})</h2>
-            <p className="text-xs text-ink-500">
-              These bank deposits match payments you already logged — usually because the tenant
-              reported paying and you approved it. They are kept here so your books stay right and the
-              money is never counted twice.
+        <section className="card mb-6 border-amber-200">
+          <div className="border-b border-amber-100 bg-amber-50 px-5 py-4">
+            <h2 className="font-semibold text-amber-900">
+              Is this the same money? ({alreadyRecorded.length})
+            </h2>
+            <p className="text-xs text-amber-800">
+              Each of these looks like a payment you already recorded — usually because the tenant
+              reported paying and you approved it. Nothing has been counted twice, and nothing is
+              booked until you say. Answer each one so the books are right.
             </p>
           </div>
           <ul className="divide-y divide-slate-100">
             {alreadyRecorded.map((deposit) => (
-              <li key={deposit.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-sm">
-                <div className="min-w-0">
-                  <span className="font-medium" style={{ fontVariantNumeric: "tabular-nums" }}>
-                    {moneyExact(deposit.amount)}
-                  </span>
-                  <span className="ml-2 text-ink-500">{shortDate(deposit.posted_date)}</span>
-                  <div className="truncate text-xs text-ink-500">{deposit.description}</div>
+              <li key={deposit.id} className="px-5 py-4 text-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="text-base font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {moneyExact(deposit.amount)}
+                    </span>
+                    <span className="ml-2 text-ink-500">
+                      {shortDate(deposit.posted_date)}
+                      {deposit.account_name ? ` · ${deposit.account_name}` : ""}
+                    </span>
+                    <div className="truncate text-xs text-ink-500">{deposit.description}</div>
+                    <p className="mt-1.5 text-xs text-ink-700">
+                      Looks like{" "}
+                      <strong>
+                        {deposit.matched_tenant ? `${deposit.matched_tenant}'s payment` : "a payment"}
+                      </strong>{" "}
+                      you already have on the books
+                      {deposit.matched_payment_date
+                        ? ` from ${shortDate(deposit.matched_payment_date)}`
+                        : ""}
+                      .
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <form action={confirmDuplicate}>
+                      <input type="hidden" name="id" value={deposit.id} />
+                      <button className="btn btn-sm" title="Don't count it again">
+                        Yes — same payment
+                      </button>
+                    </form>
+                    <form action={unignoreImport}>
+                      <input type="hidden" name="id" value={deposit.id} />
+                      <button className="btn-secondary btn-sm" title="Treat this as separate money">
+                        No — it&apos;s separate
+                      </button>
+                    </form>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {deposit.matched_tenant && (
-                    <span className="text-xs text-ink-700">{deposit.matched_tenant}</span>
-                  )}
-                  <Badge value="paid" label="Counted once" />
-                  <form action={unignoreImport}>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* ---------------- Bills paid out ---------------- */}
+      {expenseReview.length > 0 && (
+        <section className="card mb-6">
+          <div className="border-b border-slate-100 px-5 py-4">
+            <h2 className="font-semibold">Money that went out ({expenseReview.length})</h2>
+            <p className="text-xs text-ink-500">
+              Withdrawals from your statement, with a category guessed from the description. Check
+              it and book it, and it lands in Accounting against the right property.
+            </p>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {expenseReview.map((deposit) => (
+              <li key={deposit.id} className="px-5 py-4 text-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="text-base font-semibold text-rose-600" style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {moneyExact(Math.abs(deposit.amount))}
+                    </span>
+                    <span className="ml-2 text-ink-500">
+                      {shortDate(deposit.posted_date)}
+                      {deposit.account_name ? ` · ${deposit.account_name}` : ""}
+                    </span>
+                    <div className="truncate text-ink-700">{deposit.description}</div>
+                  </div>
+                  <form action={bookImportAsExpense} className="flex flex-wrap items-end gap-2">
                     <input type="hidden" name="id" value={deposit.id} />
-                    <button className="btn-secondary btn-sm" title="Treat this as a separate payment after all">
-                      Not a duplicate
-                    </button>
+                    <div>
+                      <label className="label">Category</label>
+                      <select
+                        name="category"
+                        className="input"
+                        defaultValue={suggestCategory(deposit.description)}
+                      >
+                        {EXPENSE_CATEGORIES.map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Property</label>
+                      <select
+                        name="property_id"
+                        className="input"
+                        defaultValue={
+                          accounts.find((a) => a.id === deposit.account)?.property ?? ""
+                        }
+                      >
+                        <option value="">Portfolio-wide</option>
+                        {properties.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button className="btn btn-sm">Book expense</button>
                   </form>
                 </div>
               </li>
             ))}
           </ul>
+          <div className="border-t border-slate-100 px-5 py-3">
+            <form action={clearImports}>
+              <input type="hidden" name="status" value="expense_review" />
+              <button className="btn-secondary btn-sm">Not expenses — clear these</button>
+            </form>
+          </div>
         </section>
       )}
 
@@ -243,7 +360,7 @@ export default async function BankingPage({
               <div>
                 <label className="label">Into account</label>
                 <select name="account_id" className="input" defaultValue="">
-                  <option value="">Unassigned</option>
+                  <option value="">Work it out from the statement</option>
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
@@ -276,11 +393,17 @@ export default async function BankingPage({
                 placeholder={"Date,Description,Amount\n03/01/2026,ZELLE FROM DANA LIU,1250.00"}
               />
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="deposits_only" defaultChecked className="h-4 w-4 rounded border-slate-300" />
-              Only import money coming in (skip withdrawals)
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" name="deposits_only" className="mt-0.5 h-4 w-4 rounded border-slate-300" />
+              <span>
+                Rent only — ignore money going out
+                <span className="block text-xs text-ink-500">
+                  Leave this off and withdrawals come in too, sorted into expense categories for
+                  you to check.
+                </span>
+              </span>
             </label>
-            <button className="btn w-full justify-center">Import deposits</button>
+            <button className="btn w-full justify-center">Import statement</button>
           </form>
 
           <details className="mt-4 text-xs text-ink-500">
