@@ -72,7 +72,7 @@ test("two five-room houses can be managed from setup through partner reporting",
       await expect(page).toHaveURL(/\/properties\/(?!new(?:[/?]|$))[^/?]+$/);
       propertyIds.push(new URL(page.url()).pathname.split("/").pop()!);
       await page.getByRole("link", { name: /Rooms \(5\)/ }).click();
-      await expect(page.getByText("5 rooms")).toBeVisible();
+      await expect(page.getByText("0 of 5 occupied")).toBeVisible();
       await expect(page.getByText(`$${(house.rent * 5).toLocaleString()}`)).toBeVisible();
 
       if (house.name === "Maple House") {
@@ -81,11 +81,13 @@ test("two five-room houses can be managed from setup through partner reporting",
         });
         const firstRoom = roomsSection.getByRole("listitem").first();
         await expect(firstRoom.getByRole("button", { name: /save/i })).toHaveCount(0);
-        await firstRoom.getByLabel("Deposit ($)").fill("500");
+        await firstRoom.getByText("Edit room details").click();
+        await firstRoom.getByLabel("Deposit").fill("500");
         await expect(firstRoom.getByText("All changes saved")).toBeVisible();
         await page.reload();
+        await roomsSection.getByRole("listitem").first().getByText("Edit room details").click();
         await expect(
-          roomsSection.getByRole("listitem").first().getByLabel("Deposit ($)")
+          roomsSection.getByRole("listitem").first().getByLabel("Deposit")
         ).toHaveValue("500");
       }
     }
@@ -124,6 +126,23 @@ test("two five-room houses can be managed from setup through partner reporting",
       }
     }
     await expect(page.getByText("Current tenants (10)")).toBeVisible();
+  });
+
+  await test.step("room assignment is changed from one simple selector", async () => {
+    await page.goto(`/properties/${propertyIds[0]}?tab=rooms`);
+    const roomsSection = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "Rooms" }),
+    });
+    const firstRoom = roomsSection.getByRole("listitem").first();
+    await expect(firstRoom.getByLabel("Tenant")).toHaveValue(
+      tenantIds.get(houses[0].tenants[0])!
+    );
+    await firstRoom.getByLabel("Tenant").selectOption("");
+    await expect(firstRoom.getByText("No tenant assigned")).toBeVisible();
+    await firstRoom.getByLabel("Tenant").selectOption(tenantIds.get(houses[0].tenants[0])!);
+    await expect(firstRoom.getByLabel("Tenant")).toHaveValue(
+      tenantIds.get(houses[0].tenants[0])!
+    );
   });
 
   await test.step("edit a tenant and keep the room assignment", async () => {
@@ -286,21 +305,38 @@ test("two five-room houses can be managed from setup through partner reporting",
   });
 
   await test.step("active properties are protected, empty ones can be removed and restored", async () => {
-    await page.goto(`/properties/${propertyIds[0]}`);
-    await page.getByText("Property options").click();
-    page.once("dialog", (dialog) => dialog.accept());
-    await page.getByRole("button", { name: "Remove property" }).click();
-    await expect(page.getByText(/Move out the current tenants/)).toBeVisible();
+    await page.goto("/properties");
+    const occupiedCard = page.getByRole("article").filter({ hasText: houses[0].name });
+    await expect(occupiedCard.getByRole("button", { name: "Remove" })).toBeDisabled();
+    await expect(occupiedCard.getByText("Move out 5 tenants first")).toBeVisible();
 
     await page.goto("/properties/new");
     await page.getByLabel("Property name").fill("Temporary Property");
     await page.getByLabel(/Street address/).fill("303 Test Lane");
     await waitForAutosave(page);
     await page.getByRole("button", { name: "Done" }).click();
-    await page.getByText("Property options").click();
-    page.once("dialog", (dialog) => dialog.accept());
-    await page.getByRole("button", { name: "Remove property" }).click();
-    await expect(page).toHaveURL(/\/properties\?removed=1/);
+    await page.goto("/properties");
+    const temporaryCard = page.getByRole("article").filter({ hasText: "Temporary Property" });
+    page.once("dialog", async (dialog) => {
+      expect(dialog.type()).toBe("confirm");
+      expect(dialog.message()).toContain("Temporary Property");
+      await dialog.accept();
+    });
+    await temporaryCard.getByRole("button", { name: "Remove" }).click();
+    await expect(page).toHaveURL(/\/properties\?removed=/);
+    await expect(page.getByRole("button", { name: "Undo removal" })).toBeVisible();
+    await page.getByRole("button", { name: "Undo removal" }).click();
+    await expect(page).toHaveURL(/\/properties\?restored=1/);
+    await expect(
+      page.getByRole("article").filter({ hasText: "Temporary Property" })
+    ).toBeVisible();
+
+    const restoredCard = page.getByRole("article").filter({ hasText: "Temporary Property" });
+    page.once("dialog", async (dialog) => {
+      expect(dialog.type()).toBe("confirm");
+      await dialog.accept();
+    });
+    await restoredCard.getByRole("button", { name: "Remove" }).click();
     await page.getByRole("link", { name: /Removed/ }).click();
     const removedRow = page.getByRole("listitem").filter({ hasText: "Temporary Property" });
     await removedRow.getByRole("button", { name: "Restore" }).click();

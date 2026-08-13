@@ -219,6 +219,7 @@ export async function autosaveProperty(form: FormData) {
 export async function archiveProperty(form: FormData) {
   const client = await pb();
   const id = s(form, "id");
+  const fromList = s(form, "from") === "properties";
   const property = await client.collection("properties").getOne(id).catch(() => null);
   if (!property) return;
 
@@ -232,7 +233,11 @@ export async function archiveProperty(form: FormData) {
     ["sent", "signed", "active"].includes(lease.status)
   );
   if (tenants.length > 0 || activeLeases.length > 0) {
-    redirect(`/properties/${id}?error=occupied`);
+    redirect(
+      fromList
+        ? `/properties?error=occupied&property=${encodeURIComponent(id)}`
+        : `/properties/${id}?error=occupied`
+    );
   }
 
   await client.collection("properties").update(id, {
@@ -241,14 +246,19 @@ export async function archiveProperty(form: FormData) {
     priority_listing: false,
   });
   refresh();
-  redirect("/properties?removed=1");
+  redirect(`/properties?removed=${encodeURIComponent(id)}`);
 }
 
 export async function restoreProperty(form: FormData) {
   const client = await pb();
-  await client.collection("properties").update(s(form, "id"), { archived: false });
+  const id = s(form, "id");
+  await client.collection("properties").update(id, { archived: false });
   refresh();
-  redirect("/properties?view=removed&restored=1");
+  redirect(
+    s(form, "from") === "undo"
+      ? "/properties?restored=1"
+      : "/properties?view=removed&restored=1"
+  );
 }
 
 export async function createProperty(form: FormData) {
@@ -411,7 +421,7 @@ export async function addRooms(form: FormData) {
   }
   await syncPropertyOccupancy(propertyId);
   refresh();
-  redirect(`/properties/${propertyId}`);
+  redirect(`/properties/${propertyId}?tab=rooms`);
 }
 
 export async function updateUnit(form: FormData) {
@@ -458,16 +468,24 @@ export async function deleteUnit(form: FormData) {
   const id = s(form, "id");
   const propertyId = s(form, "property_id");
 
-  // Don't leave people or leases pointing at a room that no longer exists.
-  const residents = await client
-    .collection("people")
-    .getFullList({ perPage: 200, filter: `unit="${id}"` });
+  const [residents, leases] = await Promise.all([
+    client.collection("people").getFullList({ perPage: 200, filter: `unit="${id}"` }),
+    client.collection("leases").getFullList({ perPage: 200, filter: `unit="${id}"` }),
+  ]);
+  const currentResidents = residents.filter(
+    (person) => person.stage === "tenant" && !person.archived
+  );
+  const activeLeases = leases.filter((lease) =>
+    ["sent", "signed", "active"].includes(lease.status)
+  );
+  if (currentResidents.length > 0 || activeLeases.length > 0) {
+    redirect(`/properties/${propertyId}?tab=rooms&error=room_in_use`);
+  }
+
+  // Keep historical people and leases valid after an unused room is removed.
   for (const person of residents) {
     await client.collection("people").update(person.id, { unit: "" });
   }
-  const leases = await client
-    .collection("leases")
-    .getFullList({ perPage: 200, filter: `unit="${id}"` });
   for (const lease of leases) {
     await client.collection("leases").update(lease.id, { unit: "" });
   }
@@ -475,7 +493,7 @@ export async function deleteUnit(form: FormData) {
   await client.collection("units").delete(id);
   await syncPropertyOccupancy(propertyId);
   refresh();
-  redirect(`/properties/${propertyId}`);
+  redirect(`/properties/${propertyId}?tab=rooms`);
 }
 
 /** Assigns (or clears) the tenant living in a room. */
@@ -505,7 +523,7 @@ export async function assignRoomTenant(form: FormData) {
 
   await syncPropertyOccupancy(propertyId);
   refresh();
-  redirect(`/properties/${propertyId}`);
+  redirect(`/properties/${propertyId}?tab=rooms`);
 }
 
 export async function toggleListing(form: FormData) {

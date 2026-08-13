@@ -66,6 +66,11 @@ export default async function PropertyDetailPage({
           Move out the current tenants and end active signing or lease work before removing this property.
         </div>
       )}
+      {error === "room_in_use" && (
+        <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This room still has a current tenant or active lease. Move the tenant out and end the lease before deleting it.
+        </div>
+      )}
 
       <nav className="mb-6 flex gap-1 overflow-x-auto border-b border-slate-200" aria-label="Property sections">
         {[
