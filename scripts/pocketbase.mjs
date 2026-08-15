@@ -44,12 +44,18 @@ export function paths() {
     dataDir,
     pbData: path.join(dataDir, "pb_data"),
     migrations: path.join(root, "pb", "pb_migrations"),
+    // The browser app: plain HTML, CSS and JS that PocketBase serves itself.
+    web: path.join(root, "web"),
   };
 }
 
 export const PB_PORT = process.env.PB_PORT || "8090";
 export const PB_EMAIL = process.env.PB_ADMIN_EMAIL || "admin@opentenant.local";
 export const PB_PASSWORD = process.env.PB_ADMIN_PASSWORD || "opentenant-local-dev";
+
+/** The account the browser app signs in with. */
+export const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@opentenant.local";
+export const OWNER_PASSWORD = process.env.OWNER_PASSWORD || "opentenant-local-dev";
 
 /** Applies migrations and ensures the superuser account the app signs in with. */
 export function prepare() {
@@ -73,17 +79,55 @@ export function prepare() {
 
 /** Spawns `pocketbase serve`. Returns the child process. */
 export function serve({ silent = false } = {}) {
-  const { pbData, migrations } = paths();
+  const { pbData, migrations, web } = paths();
   return spawn(
     binaryPath(),
     [
       "serve",
       "--dir", pbData,
       "--migrationsDir", migrations,
+      "--publicDir", web,
       "--http", `127.0.0.1:${PB_PORT}`,
     ],
     { stdio: silent ? "ignore" : "inherit" }
   );
+}
+
+/**
+ * Makes sure the landlord has an account to sign in with.
+ *
+ * The browser app talks to PocketBase directly, so it needs a real record —
+ * and creating owners is closed to the public, or anyone who found a deployed
+ * copy could make themselves one. So it happens here, once, on startup.
+ * Returns true when it created the account, so the caller can print the
+ * password exactly once.
+ */
+export async function ensureOwner() {
+  const base = `http://127.0.0.1:${PB_PORT}`;
+  const auth = await fetch(`${base}/api/collections/_superusers/auth-with-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ identity: PB_EMAIL, password: PB_PASSWORD }),
+  }).then((r) => (r.ok ? r.json() : null));
+  if (!auth?.token) return false;
+
+  const existing = await fetch(`${base}/api/collections/owners/records?perPage=1`, {
+    headers: { Authorization: auth.token },
+  }).then((r) => (r.ok ? r.json() : null));
+  if (!existing || (existing.totalItems ?? 0) > 0) return false;
+
+  const created = await fetch(`${base}/api/collections/owners/records`, {
+    method: "POST",
+    headers: { Authorization: auth.token, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: OWNER_EMAIL,
+      password: OWNER_PASSWORD,
+      passwordConfirm: OWNER_PASSWORD,
+      emailVisibility: true,
+      verified: true,
+    }),
+  });
+  return created.ok;
 }
 
 export async function waitUntilHealthy(timeoutMs = 30000) {
@@ -106,6 +150,16 @@ export async function waitUntilHealthy(timeoutMs = 30000) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   prepare();
   const child = serve();
+  waitUntilHealthy().then(async (up) => {
+    if (!up) return;
+    const created = await ensureOwner();
+    console.log(
+      `\nOpenTenant is at http://127.0.0.1:${PB_PORT}` +
+        (created
+          ? `\nSign in with ${OWNER_EMAIL} / ${OWNER_PASSWORD} — change it in Settings.\n`
+          : `\nSign in as ${OWNER_EMAIL}.\n`)
+    );
+  });
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.on(signal, () => child.kill(signal));
   }

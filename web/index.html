@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenTenant</title>
+<meta name="description" content="Free, open-source property management for landlords." />
+<link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+<!--
+  The whole app is this one page. No framework, no build step, no bundler —
+  app.js renders into #app and talks to PocketBase's REST API, and PocketBase
+  itself serves these files. To run the lot: one binary.
+-->
+<div id="app"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
