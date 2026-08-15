@@ -11,20 +11,30 @@ import * as api from "./api.js";
 import { esc, money, moneyExact, monthLabel, monthKey, monthlyLedger, shortDate, sumBy, titleCase } from "./lib.js";
 import { renderMonths } from "./months.js";
 import {
+  deletePayment,
+  leaseForm,
+  leaveLease,
+  paymentForm,
   personTies,
   propertyForm,
   removePerson,
   rentForm,
+  saveLease,
+  savePayment,
   saveProperty,
   saveTenant,
   scheduleRent,
   tenantForm,
 } from "./forms.js";
+import { screenPerson } from "./person.js";
+import { bookStatement, clearReview, readStatement, screenBank } from "./bank.js";
+import { CATEGORIES, categoryLabel, methodLabel } from "./statements.js";
 
 const NAV = [
   { href: "#/", label: "Home", icon: "▦", hint: "This month at a glance" },
   { href: "#/money", label: "Money", icon: "$", hint: "What you kept, month by month" },
   { href: "#/rent", label: "Rent", icon: "◷", hint: "Who has paid and who hasn't" },
+  { href: "#/bank", label: "Bank", icon: "▤", hint: "Import statements, sort the bills" },
   { href: "#/properties", label: "Properties", icon: "⌂", hint: "Your places and rooms" },
   { href: "#/tenants", label: "Tenants", icon: "☺", hint: "Who lives where" },
   { href: "#/repairs", label: "Repairs", icon: "⚒", hint: "Requests from you or tenants" },
@@ -50,8 +60,8 @@ function routeParams() {
 /** The menu entry a page belongs to, so a sub-page still lights one up. */
 function navFor(route) {
   if (route.startsWith("/property/")) return NAV.find((i) => i.href === "#/properties");
-  if (route.startsWith("/tenant/")) return NAV.find((i) => i.href === "#/tenants");
-  if (route.startsWith("/rent/")) return NAV.find((i) => i.href === "#/rent");
+  if (route.startsWith("/tenant/") || route.startsWith("/lease/")) return NAV.find((i) => i.href === "#/tenants");
+  if (route.startsWith("/rent/") || route.startsWith("/payment/")) return NAV.find((i) => i.href === "#/rent");
   return NAV.find((item) => item.href === `#${route}`) ?? NAV[0];
 }
 
@@ -568,13 +578,19 @@ async function screenProperty() {
           .map(
             (c) => `
           <li>
-            <div>
-              <div class="t">${esc(nameOf.get(c.person) || "Unassigned")} · ${esc(moneyExact(c.amount))}</div>
-              <div class="s">${esc(titleCase(c.type || "rent"))} · due ${esc(shortDate(c.due_date))}</div>
+            <div style="min-width:0">
+              ${c.person
+                ? `<a class="t" href="#/tenant/${esc(c.person)}" style="color:var(--brand-700)">${esc(nameOf.get(c.person) || "Unassigned")} →</a>`
+                : `<div class="t">Unassigned</div>`}
+              <div class="s">
+                ${esc(moneyExact(c.amount))} · ${esc(titleCase(c.type || "rent"))} · due ${esc(shortDate(c.due_date))}
+                ${c.status === "paid" && c.method ? ` · paid by ${esc(methodLabel(c.method))}` : ""}
+              </div>
             </div>
-            <div style="display:flex;align-items:center;gap:.6rem">
+            <div style="display:flex;align-items:center;gap:.5rem">
               <span class="tag ${c.status === "paid" ? "good" : "bad"}">${esc(titleCase(c.status))}</span>
               ${c.status !== "paid" ? `<button class="btn" data-action="mark-paid" data-id="${esc(c.id)}">Mark paid</button>` : ""}
+              <a class="btn-secondary" href="#/payment/${esc(c.id)}">Edit</a>
             </div>
           </li>`
           )
@@ -587,13 +603,19 @@ async function screenProperty() {
       : `<section class="card"><ul class="rows">${residents
           .map((p) => {
             const room = rooms.find((r) => r.id === p.unit);
+            const owes = charges.filter((c) => c.person === p.id && c.status !== "paid");
             return `
             <li>
-              <div>
-                <div class="t">${esc(`${p.first_name ?? ""} ${p.last_name ?? ""}`.trim())}</div>
+              <a href="#/tenant/${esc(p.id)}" style="flex:1;min-width:0">
+                <div class="t">${esc(`${p.first_name ?? ""} ${p.last_name ?? ""}`.trim())} <span class="muted small">→</span></div>
                 <div class="s">${esc(p.email || "No email")}${room ? ` · ${esc(room.name)}` : ""}</div>
+              </a>
+              <div style="display:flex;align-items:center;gap:.5rem">
+                ${owes.length
+                  ? `<span class="small" style="color:var(--out);font-weight:600">${esc(money(sumBy(owes, (c) => c.amount)))} owed</span>`
+                  : `<span class="small muted">Settled</span>`}
+                <span class="tag ${p.stage === "tenant" ? "good" : ""}">${esc(titleCase(p.stage))}</span>
               </div>
-              <span class="tag ${p.stage === "tenant" ? "good" : ""}">${esc(titleCase(p.stage))}</span>
             </li>`;
           })
           .join("")}</ul></section>`;
@@ -612,9 +634,7 @@ async function screenProperty() {
             <div class="field" style="margin:0">
               <label for="x-category">Category</label>
               <select id="x-category" name="category">
-                ${["repairs", "utilities", "insurance", "taxes", "mortgage", "turnover", "other"]
-                  .map((c) => `<option value="${c}">${titleCase(c)}</option>`)
-                  .join("")}
+                ${CATEGORIES.map(([key, label]) => `<option value="${key}">${esc(label)}</option>`).join("")}
               </select>
             </div>
             <div class="field" style="margin:0">
@@ -646,20 +666,102 @@ async function screenProperty() {
   }
 
   if (tab === "papers") {
-    body = papers.length === 0
-      ? `<div class="card empty">No documents filed against this house yet.</div>`
-      : `<section class="card"><ul class="rows">${papers
-          .map(
-            (d) => `
-          <li>
-            <div>
-              <div class="t">${esc(d.name)}</div>
-              <div class="s">${esc(titleCase(d.type || "document"))} · ${esc(shortDate(d.created))}</div>
+    // Papers are edited in place, like rooms. A lease that has been signed, a
+    // W-9 that needs replacing, an inspection report filed under the wrong
+    // name — all of it changes, and none of it is worth a separate page.
+    const DOC_TYPES = ["lease", "addendum", "notice", "receipt", "inspection", "insurance", "id", "other"];
+    const DOC_STATES = ["draft", "sent", "signed", "filed"];
+
+    body = `
+      <section class="card card-body" style="margin-bottom:1.25rem">
+        <h2>Add a document</h2>
+        <p class="small muted" style="margin-top:.25rem">
+          Kept on this machine with everything else. Nothing is uploaded to anyone.
+        </p>
+        <form data-form="document" data-property="${esc(id)}" style="margin-top:.85rem">
+          <div class="grid grid-sm-2" style="gap:.85rem">
+            <div class="field" style="margin:0">
+              <label for="d-name">What is it?</label>
+              <input id="d-name" name="name" placeholder="Signed lease — Marcus Webb" required />
             </div>
-            <span class="tag ${d.status === "signed" ? "good" : ""}">${esc(titleCase(d.status || "draft"))}</span>
-          </li>`
-          )
-          .join("")}</ul></section>`;
+            <div class="field" style="margin:0">
+              <label for="d-type">Kind</label>
+              <select id="d-type" name="type">
+                ${DOC_TYPES.map((t) => `<option value="${t}">${titleCase(t)}</option>`).join("")}
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-sm-2" style="gap:.85rem;margin-top:.85rem">
+            <div class="field" style="margin:0">
+              <label for="d-lease">On which lease?</label>
+              <select id="d-lease" name="lease">
+                <option value="">The property itself</option>
+                ${ourLeases
+                  .map((l) => {
+                    const who = (l.tenants ?? []).map((t) => nameOf.get(t)).filter(Boolean).join(", ");
+                    return `<option value="${esc(l.id)}">${esc(who || "Lease")} · ${esc(shortDate(l.start_date))}</option>`;
+                  })
+                  .join("")}
+              </select>
+            </div>
+            <div class="field" style="margin:0">
+              <label for="d-status">Where does it stand?</label>
+              <select id="d-status" name="status">
+                ${DOC_STATES.map((s) => `<option value="${s}">${titleCase(s)}</option>`).join("")}
+              </select>
+            </div>
+          </div>
+          <label class="drop" for="d-file" style="margin-top:.85rem">
+            <input id="d-file" name="file" type="file" hidden />
+            <span class="drop-t">Attach a file</span>
+            <span class="drop-s">optional · PDF, image or document</span>
+            <span class="drop-name small" data-role="filename"></span>
+          </label>
+          <div style="margin-top:.85rem;display:flex;gap:.6rem;align-items:center">
+            <button class="btn" type="submit">Add document</button>
+            <span class="small muted" data-role="status"></span>
+          </div>
+        </form>
+      </section>
+      ${papers.length === 0
+        ? `<div class="card empty">No documents filed against this house yet.</div>`
+        : `<section class="card"><div class="roomlist">
+            <div class="roomhead"><span>Document</span><span>Status</span><span>Filed</span><span></span></div>
+            ${papers
+              .map((d) => {
+                const file = (d.file ?? [])[0];
+                return `
+              <form class="room" data-form="document-edit" data-id="${esc(d.id)}">
+                <div>
+                  <label for="d-name-${esc(d.id)}">Document</label>
+                  <input id="d-name-${esc(d.id)}" name="name" value="${esc(d.name)}" required />
+                </div>
+                <div>
+                  <label for="d-status-${esc(d.id)}">Status</label>
+                  <select id="d-status-${esc(d.id)}" name="status">
+                    ${DOC_STATES.map(
+                      (s) => `<option value="${s}"${(d.status || "draft") === s ? " selected" : ""}>${titleCase(s)}</option>`
+                    ).join("")}
+                  </select>
+                </div>
+                <div class="who">
+                  ${file
+                    ? `<a href="${esc(api.fileUrl("documents", d.id, file))}" target="_blank" rel="noopener"
+                         style="color:var(--brand-600)">Open ↗</a> · `
+                    : ""}
+                  <span class="muted">${esc(titleCase(d.type || "document"))}, ${esc(shortDate(d.created))}</span>
+                  <span data-role="status" class="muted small"></span>
+                </div>
+                <div class="acts">
+                  <button class="btn-secondary" type="submit">Save</button>
+                  <button type="button" class="btn-secondary" data-action="delete-document"
+                    data-id="${esc(d.id)}" data-name="${esc(d.name)}"
+                    style="color:var(--out);border-color:#f3c7c0">Delete</button>
+                </div>
+              </form>`;
+              })
+              .join("")}
+          </div></section>`}`;
   }
 
   return (
@@ -834,6 +936,7 @@ const ROUTES = {
   "/": screenHome,
   "/money": screenMoney,
   "/rent": screenRent,
+  "/bank": screenBank,
   "/properties": screenProperties,
   "/tenants": screenTenants,
   "/repairs": screenRepairs,
@@ -852,8 +955,12 @@ async function render() {
   else if (/^\/property\/[^/]+\/edit$/.test(route)) screen = () => propertyForm(route.split("/")[2]);
   else if (route.startsWith("/property/")) screen = screenProperty;
   else if (route === "/tenant/new") screen = () => tenantForm(null);
-  else if (route.startsWith("/tenant/")) screen = () => tenantForm(route.split("/")[2]);
+  else if (/^\/tenant\/[^/]+\/edit$/.test(route)) screen = () => tenantForm(route.split("/")[2]);
+  else if (route.startsWith("/tenant/")) screen = () => screenPerson(route.split("/")[2]);
   else if (route === "/rent/new") screen = rentForm;
+  else if (route.startsWith("/payment/")) screen = () => paymentForm(route.split("/")[2]);
+  else if (route === "/lease/new") screen = () => leaseForm(null, routeParams().get("person") || "");
+  else if (route.startsWith("/lease/")) screen = () => leaseForm(route.split("/")[2]);
   app.innerHTML = shell(`<div class="empty">Loading…</div>`);
   try {
     const html = await screen();
@@ -1019,6 +1126,48 @@ document.addEventListener("click", async (event) => {
     render();
     return;
   }
+  if (action === "delete-document") {
+    const { id, name } = target.dataset;
+    if (!confirm(`Delete "${name}"?\n\nThe file goes with it, and this cannot be undone.`)) return;
+    await api.remove("documents", id);
+    render();
+    return;
+  }
+  if (action === "delete-payment") {
+    const { id, name, amount } = target.dataset;
+    if (!confirm(`Delete this ${amount} charge for ${name}?\n\nIt disappears from your books, along with any income it recorded. This cannot be undone.\n\nIf they simply never paid, mark it unpaid instead — that keeps the record that it was owed.`)) {
+      return;
+    }
+    await deletePayment(id);
+    location.hash = "#/rent";
+    render();
+    return;
+  }
+  if (action === "leave-lease") {
+    const { id, person, name, property } = target.dataset;
+    const others = Number(target.dataset.others) || 0;
+
+    // The lease survives. It is the agreement every charge was made under, and
+    // the other tenants are still on it.
+    if (!confirm(
+      `Take ${name} off the lease at ${property}?\n\n` +
+      (others > 0
+        ? `${others} other tenant${others === 1 ? " stays" : "s stay"} on it.`
+        : `The lease stays in your records with nobody on it, so its rent history keeps its terms.`) +
+      `\n\nThis does not remove ${name} or any rent they owe.`
+    )) {
+      return;
+    }
+    await leaveLease(id, person);
+    render();
+    return;
+  }
+  if (action === "cancel-import") {
+    clearReview();
+    location.hash = "#/bank";
+    render();
+    return;
+  }
 });
 
 // Conditional bits of a form react as soon as the answer changes, not on save.
@@ -1030,7 +1179,25 @@ document.addEventListener("change", (event) => {
   if (event.target.closest('[data-form="rent-filter"]')) {
     event.target.form.requestSubmit();
   }
+  // A hidden file input gives no feedback that anything was chosen.
+  if (event.target.type === "file") {
+    const label = event.target.closest("label")?.querySelector('[data-role="filename"]');
+    if (label) label.textContent = event.target.files?.[0]?.name ?? "";
+  }
 });
+
+/**
+ * Keeps a Remove button's confirmation honest after an in-place rename.
+ *
+ * These rows save without re-rendering, so the button still carries the name
+ * the row had when the page was drawn. Rename "Room 3" to "Front bedroom" and
+ * the confirmation would go on asking about Room 3 — a question about a thing
+ * that no longer exists, which is exactly when someone clicks through.
+ */
+function renameInPlace(form, name) {
+  const button = form.querySelector("[data-action^='delete-']");
+  if (button) button.dataset.name = String(name ?? "");
+}
 
 document.addEventListener("submit", async (event) => {
   const form = event.target;
@@ -1059,7 +1226,7 @@ document.addEventListener("submit", async (event) => {
       type: "expense",
       category: data.category || "other",
       amount: Number(data.amount) || 0,
-      description: data.description || titleCase(data.category || "expense"),
+      description: data.description || categoryLabel(String(data.category || "other")),
     });
     render();
     return;
@@ -1106,6 +1273,118 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (form.dataset.form === "payment") {
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-role="status"]');
+    button.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      await savePayment(form.dataset.id, data);
+      history.back();
+      setTimeout(render, 50);
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = error.message;
+    }
+    return;
+  }
+
+  if (form.dataset.form === "lease") {
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-role="status"]');
+    button.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      const lease = await saveLease(form.dataset.id || null, data);
+      location.hash = `#/property/${lease.property}`;
+      render();
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = error.message;
+    }
+    return;
+  }
+
+  if (form.dataset.form === "document") {
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-role="status"]');
+    button.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      // Multipart, because there may be a file on it. PocketBase takes the
+      // fields and the upload in the same request.
+      const body = new FormData();
+      body.set("name", String(data.name || "Document"));
+      body.set("type", String(data.type || "other"));
+      body.set("status", String(data.status || "draft"));
+      body.set("property", form.dataset.property);
+      if (data.lease) body.set("lease", String(data.lease));
+      const file = form.querySelector('input[type="file"]')?.files?.[0];
+      if (file) body.set("file", file);
+      await api.createWithFile("documents", body);
+      render();
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = error.message;
+    }
+    return;
+  }
+
+  if (form.dataset.form === "document-edit") {
+    const status = form.querySelector('[data-role="status"]');
+    status.textContent = " · Saving…";
+    await api.update("documents", form.dataset.id, {
+      name: data.name,
+      status: data.status,
+      signed_at: data.status === "signed" ? new Date().toISOString().slice(0, 10) : "",
+    });
+    renameInPlace(form, data.name);
+    status.textContent = " · Saved";
+    return;
+  }
+
+  if (form.dataset.form === "statement") {
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-role="status"]');
+    button.disabled = true;
+    status.textContent = "Reading…";
+    try {
+      const file = form.querySelector('input[type="file"]')?.files?.[0];
+      const text = file ? await file.text() : String(data.text || "");
+      if (!text.trim()) throw new Error("Choose a file or paste the statement first.");
+      await readStatement({
+        text,
+        accountId: String(data.account || ""),
+        propertyId: String(data.property || ""),
+      });
+      render();
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = error.message;
+    }
+    return;
+  }
+
+  if (form.dataset.form === "book") {
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-role="status"]');
+    button.disabled = true;
+    status.textContent = "Booking…";
+    try {
+      const result = await bookStatement(data);
+      location.hash = "#/money";
+      render();
+      setTimeout(
+        () => alert(`Booked ${result.total} row${result.total === 1 ? "" : "s"}: ${result.payments} tenant payment${result.payments === 1 ? "" : "s"} and ${result.bills} bill${result.bills === 1 ? "" : "s"}.`),
+        150
+      );
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = error.message;
+    }
+    return;
+  }
+
   if (form.dataset.form === "room") {
     const status = form.querySelector('[data-role="status"]');
     status.textContent = " · Saving…";
@@ -1113,6 +1392,7 @@ document.addEventListener("submit", async (event) => {
       name: data.name,
       rent: Number(data.rent) || 0,
     });
+    renameInPlace(form, data.name);
     status.textContent = " · Saved";
     return;
   }
@@ -1137,6 +1417,43 @@ document.addEventListener("submit", async (event) => {
     }
     status.textContent = "Saved";
   }
+});
+
+/**
+ * Dropping a statement on the page.
+ *
+ * The browser's default for a dropped file is to navigate away and show it, so
+ * both handlers have to preventDefault — dragover included, or the drop never
+ * fires at all.
+ */
+document.addEventListener("dragover", (event) => {
+  if (event.target.closest("label.drop")) event.preventDefault();
+});
+
+document.addEventListener("dragenter", (event) => {
+  const zone = event.target.closest("label.drop");
+  if (!zone) return;
+  event.preventDefault();
+  zone.classList.add("over");
+});
+
+document.addEventListener("dragleave", (event) => {
+  const zone = event.target.closest("label.drop");
+  if (zone && !zone.contains(event.relatedTarget)) zone.classList.remove("over");
+});
+
+document.addEventListener("drop", (event) => {
+  const zone = event.target.closest("label.drop");
+  if (!zone) return;
+  event.preventDefault();
+  zone.classList.remove("over");
+  const file = event.dataTransfer?.files?.[0];
+  const input = zone.querySelector('input[type="file"]');
+  if (!file || !input) return;
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  input.files = transfer.files;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
 });
 
 window.addEventListener("hashchange", () => {

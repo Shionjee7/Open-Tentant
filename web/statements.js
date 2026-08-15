@@ -1,24 +1,22 @@
 /**
- * Turns a pasted or uploaded bank statement into rows we can match to tenants.
+ * Turns a bank statement into rows the app can book.
  *
  * Every bank exports slightly different CSV headers, so instead of demanding
- * one format we look for whichever columns look like a date, a description,
- * and an amount. Plain text pasted from a PDF statement also works.
+ * one format we look for whichever columns look like a date, a description and
+ * an amount. Plain text pasted out of a PDF statement also works.
+ *
+ * This is the same logic the server used to run, moved into the browser now
+ * that the browser talks to the database directly. Nothing about a statement
+ * leaves this machine.
  */
-
-export type ParsedRow = {
-  posted_date: string;
-  description: string;
-  amount: number;
-};
 
 const DATE_KEYS = ["date", "posted date", "posting date", "transaction date", "post date", "settled", "created"];
 const DESC_KEYS = ["description", "name", "memo", "details", "payee", "note", "notes", "narrative", "transaction", "to/from", "counterparty"];
 const AMOUNT_KEYS = ["amount", "credit", "deposit", "amount (usd)", "net amount", "amount in"];
 
-/** Splits a CSV line, honoring quoted fields containing commas. */
-function splitCsvLine(line: string): string[] {
-  const out: string[] = [];
+/** Splits a CSV line, honouring quoted fields containing commas. */
+function splitCsvLine(line) {
+  const out = [];
   let current = "";
   let inQuotes = false;
   for (let i = 0; i < line.length; i++) {
@@ -41,9 +39,9 @@ function splitCsvLine(line: string): string[] {
   return out;
 }
 
-function parseAmount(raw: string): number | null {
+function parseAmount(raw) {
   if (!raw) return null;
-  let text = raw.replace(/[$\s,]/g, "").replace(/[""]/g, "");
+  let text = String(raw).replace(/[$\s,]/g, "").replace(/[“”"]/g, "");
   if (!text) return null;
   // Accounting style: (12.34) means negative.
   let negative = false;
@@ -61,10 +59,10 @@ function parseAmount(raw: string): number | null {
   return negative ? -value : value;
 }
 
-/** Normalizes the many date shapes banks emit into YYYY-MM-DD. */
-export function parseDate(raw: string): string | null {
+/** Normalises the many date shapes banks emit into YYYY-MM-DD. */
+export function parseDate(raw) {
   if (!raw) return null;
-  const text = raw.trim().replace(/^["']|["']$/g, "");
+  const text = String(raw).trim().replace(/^["']|["']$/g, "");
 
   const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
@@ -80,13 +78,11 @@ export function parseDate(raw: string): string | null {
 
   // "Mar 3, 2026" / "3 Mar 2026"
   const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10);
-  }
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
   return null;
 }
 
-function findIndex(headers: string[], candidates: string[]): number {
+function findIndex(headers, candidates) {
   for (const candidate of candidates) {
     const index = headers.findIndex((h) => h === candidate);
     if (index !== -1) return index;
@@ -102,15 +98,21 @@ function findIndex(headers: string[], candidates: string[]): number {
  * All columns that carry human-readable context, in order. Exports often split
  * the payer's name and the memo across separate columns (Cash App does), and
  * the name is the strongest matching signal — so we keep every one of them.
+ *
+ * "Details" and "Transaction" are held back as a fallback. Chase has a Details
+ * column next to its Description column, and it holds DEBIT or CREDIT — reading
+ * both gives "DEBIT — DUKE ENERGY", which then fails to match anything and
+ * reads like nonsense in the books. A column is only worth joining on when
+ * nothing better is present.
  */
 const STRONG_DESC = ["description", "name", "memo", "payee", "note", "notes", "narrative", "to/from", "counterparty", "sender"];
 const WEAK_DESC = ["details", "transaction"];
 
-function describeIndices(headers: string[], dateIndex: number, amountIndex: number): number[] {
+function describeIndices(headers, dateIndex, amountIndex) {
   // Skip columns that are clearly identifiers or bookkeeping noise.
-  const isNoise = (header: string) => /id$|^id|balance|currency|status|type|fee|tax|account/.test(header);
-  const pick = (keys: string[]) => {
-    const indices: number[] = [];
+  const isNoise = (header) => /id$|^id|balance|currency|status|type|fee|tax|account/.test(header);
+  const pick = (keys) => {
+    const indices = [];
     headers.forEach((header, index) => {
       if (index === dateIndex || index === amountIndex || isNoise(header)) return;
       if (keys.some((key) => header.includes(key))) indices.push(index);
@@ -118,16 +120,12 @@ function describeIndices(headers: string[], dateIndex: number, amountIndex: numb
     return indices;
   };
 
-  // "Details" and "Transaction" are a fallback. Chase has a Details column next
-  // to its Description column and it holds DEBIT or CREDIT, so reading both
-  // gives "DEBIT — DUKE ENERGY" — which matches nothing and reads like nonsense
-  // in the books. A column is only worth joining on when nothing better exists.
   const strong = pick(STRONG_DESC);
   return strong.length > 0 ? strong : pick(WEAK_DESC);
 }
 
 /** Parses CSV/TSV text that has a header row. */
-function parseDelimited(lines: string[]): ParsedRow[] | null {
+function parseDelimited(lines) {
   const headers = splitCsvLine(lines[0]).map((h) => h.toLowerCase().replace(/^["']|["']$/g, ""));
   const dateIndex = findIndex(headers, DATE_KEYS);
   let amountIndex = findIndex(headers, AMOUNT_KEYS);
@@ -139,7 +137,7 @@ function parseDelimited(lines: string[]): ParsedRow[] | null {
 
   const descIndices = describeIndices(headers, dateIndex, amountIndex);
 
-  const rows: ParsedRow[] = [];
+  const rows = [];
   for (const line of lines.slice(1)) {
     if (!line.trim()) continue;
     const cells = splitCsvLine(line);
@@ -151,10 +149,7 @@ function parseDelimited(lines: string[]): ParsedRow[] | null {
       descIndices.length > 0
         ? descIndices.map((i) => cells[i] ?? "")
         : cells.filter((_, i) => i !== dateIndex && i !== amountIndex);
-    const description = pieces
-      .map((p) => p.trim())
-      .filter(Boolean)
-      .join(" — ");
+    const description = pieces.map((p) => p.trim()).filter(Boolean).join(" — ");
 
     rows.push({ posted_date: date, description, amount });
   }
@@ -165,8 +160,8 @@ function parseDelimited(lines: string[]): ParsedRow[] | null {
  * Fallback for text copied out of a PDF statement, where each line looks
  * roughly like: 03/04/2026  ZELLE FROM DANA LIU  1,250.00
  */
-function parseFreeText(lines: string[]): ParsedRow[] {
-  const rows: ParsedRow[] = [];
+function parseFreeText(lines) {
+  const rows = [];
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -188,22 +183,19 @@ function parseFreeText(lines: string[]): ParsedRow[] {
     const amount = parseAmount(last[0]);
     if (amount === null) continue;
 
-    const description = trimmed
-      .slice(dateMatch[0].length, last.index)
-      .replace(/\s+/g, " ")
-      .trim();
+    const description = trimmed.slice(dateMatch[0].length, last.index).replace(/\s+/g, " ").trim();
     rows.push({ posted_date: date, description, amount });
   }
   return rows;
 }
 
-export function parseStatement(text: string): ParsedRow[] {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+export function parseStatement(text) {
+  const lines = String(text).split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length === 0) return [];
 
   // Real exports rarely start with the header row — the bank's name, the
-  // account number, and the statement period usually come first. So look for
-  // the header rather than assuming line one, and take the first position that
+  // account number and the statement period usually come first. So look for the
+  // header rather than assuming line one, and take the first position that
   // yields actual rows.
   const searchDepth = Math.min(lines.length, 15);
   for (let start = 0; start < searchDepth; start++) {
@@ -214,8 +206,8 @@ export function parseStatement(text: string): ParsedRow[] {
   return parseFreeText(lines);
 }
 
-/** Stable id for a row so importing the same statement twice doesn't duplicate. */
-export function fingerprint(accountId: string, row: ParsedRow): string {
+/** Stable id for a row, so importing the same statement twice doesn't duplicate. */
+export function fingerprint(accountId, row) {
   const normalized = row.description.toLowerCase().replace(/\s+/g, " ").trim();
   return `${accountId}|${row.posted_date}|${row.amount.toFixed(2)}|${normalized}`;
 }
@@ -229,23 +221,9 @@ export function fingerprint(accountId: string, row: ParsedRow): string {
  * both and say what we concluded, so a wrong guess is visible rather than
  * silent.
  */
-export type AccountHint = {
-  id: string;
-  name: string;
-  institution: string;
-  last4: string;
-};
-
-export type AccountGuess = {
-  id: string;
-  /** Plain English, shown to the landlord: "matched ····4821 in the statement". */
-  reason: string;
-  score: number;
-};
-
-export function detectAccount(text: string, accounts: AccountHint[]): AccountGuess | null {
-  const haystack = text.toLowerCase().slice(0, 20000);
-  // Digit runs that a statement would print for an account number: masked
+export function detectAccount(text, accounts) {
+  const haystack = String(text).toLowerCase().slice(0, 20000);
+  // Digit runs a statement would print for an account number: masked
   // (****4821, xxxx4821, ···4821) or the tail of a longer number.
   const masked = [...haystack.matchAll(/[*x·•#-]{2,}\s?(\d{4})\b/g)].map((m) => m[1]);
   const afterLabel = [...haystack.matchAll(/account[^0-9]{0,20}(\d{4})\b/g)].map((m) => m[1]);
@@ -254,7 +232,7 @@ export function detectAccount(text: string, accounts: AccountHint[]): AccountGue
   const guesses = accounts
     .map((account) => {
       let score = 0;
-      const reasons: string[] = [];
+      const reasons = [];
 
       if (account.last4 && digits.has(account.last4)) {
         score += 60;
@@ -284,25 +262,53 @@ export function detectAccount(text: string, accounts: AccountHint[]): AccountGue
 }
 
 /**
- * What kind of expense does this withdrawal look like?
- *
- * Bank descriptions are terse but consistent — "DUKE ENERGY", "HOME DEPOT",
- * "STATE FARM". Matching them to a category turns a statement into bookkeeping
- * instead of a list of mystery debits. It's a suggestion: the category sits in
- * a dropdown the landlord can change before booking it.
+ * The bills a landlord actually pays, kept separate rather than lumped into one
+ * "utilities" bucket. At tax time the difference between the water bill and the
+ * mortgage matters, and a category you have to split apart later is a category
+ * that was never worth recording.
  */
-const CATEGORY_HINTS: [string, RegExp][] = [
-  ["utilities", /\b(electric|energy|power|duke|aep|con\s?ed|pg&?e|gas co|natural gas|water|sewer|utility|utilities|waste|trash|refuse|internet|comcast|xfinity|spectrum|at&?t|verizon)\b/],
-  ["mortgage", /\b(mortgage|loan pmt|loan payment|escrow|rocket mortgage|freedom mtg|mr cooper|wells fargo home)\b/],
-  ["insurance", /\b(insurance|insur|state farm|allstate|geico|progressive|liberty mutual|nationwide)\b/],
-  ["taxes", /\b(tax|treasurer|county of|irs|dept of revenue)\b/],
-  ["repairs", /\b(home depot|lowe'?s|menards|ace hardware|plumb|hvac|roof|electric(ian)?|handyman|repair|contractor|sherwin|grainger)\b/],
-  ["turnover", /\b(clean|carpet|paint|junk removal|dumpster|locksmith|turnover)\b/],
-  ["software", /\b(software|subscription|saas|google|microsoft|adobe|zoom|godaddy|namecheap)\b/],
+export const CATEGORIES = [
+  ["mortgage", "Mortgage"],
+  ["electric", "Electric"],
+  ["water", "Water & sewer"],
+  ["gas", "Gas & heating"],
+  ["internet", "Internet & phone"],
+  ["insurance", "Insurance"],
+  ["taxes", "Property taxes"],
+  ["repairs", "Repairs"],
+  ["turnover", "Turnover & cleaning"],
+  ["hoa", "HOA & fees"],
+  ["utilities", "Other utilities"],
+  ["other", "Something else"],
 ];
 
-export function suggestCategory(description: string): string {
-  const text = description.toLowerCase();
+export function categoryLabel(value) {
+  return CATEGORIES.find(([key]) => key === value)?.[1] ?? "Something else";
+}
+
+/**
+ * What kind of bill does this withdrawal look like?
+ *
+ * Bank descriptions are terse but consistent — "DUKE ENERGY", "CITY OF COLUMBUS
+ * WATER", "HOME DEPOT". Matching them turns a statement into bookkeeping
+ * instead of a list of mystery debits. It is only a suggestion: every row shows
+ * the category in a dropdown you can change before anything is booked.
+ */
+const CATEGORY_HINTS = [
+  ["mortgage", /\b(mortgage|mtg|loan pmt|loan payment|escrow|rocket mortgage|freedom mtg|mr cooper|wells fargo home|chase home|penny ?mac|lakeview|selene)\b/],
+  ["electric", /\b(electric|energy|power|duke|aep|con\s?ed|pg&?e|dominion|entergy|xcel|georgia power|fpl|reliant)\b/],
+  ["water", /\b(water|sewer|sewage|aqua|utilit(y|ies) (dept|department)|city of [a-z ]*water|waste ?water|trash|refuse|garbage|waste management|rumpke|republic services)\b/],
+  ["gas", /\b(natural gas|gas co|gas company|columbia gas|nicor|spire|national grid|heating oil|propane)\b/],
+  ["internet", /\b(internet|wi-?fi|comcast|xfinity|spectrum|at&?t|verizon|t-?mobile|cox comm|frontier|centurylink|google fiber|starlink|phone)\b/],
+  ["insurance", /\b(insurance|insur|state farm|allstate|geico|progressive|liberty mutual|nationwide|travelers|erie ins)\b/],
+  ["taxes", /\b(tax|treasurer|county of|irs|dept of revenue|auditor)\b/],
+  ["repairs", /\b(home depot|lowe'?s|menards|ace hardware|plumb|hvac|roof|electrician|handyman|repair|contractor|sherwin|grainger|appliance)\b/],
+  ["turnover", /\b(clean|carpet|paint|junk removal|dumpster|locksmith|turnover|landscap|lawn|snow)\b/],
+  ["hoa", /\b(hoa|homeowners assoc|condo assoc|association dues|management fee)\b/],
+];
+
+export function suggestCategory(description) {
+  const text = String(description).toLowerCase();
   for (const [category, pattern] of CATEGORY_HINTS) {
     if (pattern.test(text)) return category;
   }
@@ -310,17 +316,55 @@ export function suggestCategory(description: string): string {
 }
 
 /**
- * Scores how likely a deposit belongs to a given tenant/payment.
- * Name in the description is the strongest signal; an exact amount match and
- * a nearby date add confidence.
+ * How the money arrived.
+ *
+ * A landlord chasing a missing payment asks "did they Zelle it?", so the way it
+ * came in is worth keeping. Statements say so plainly enough to read.
  */
-export function matchScore(
-  description: string,
-  amount: number,
-  candidate: { tenantName: string; amount: number; dueDate: string; postedDate: string }
-): number {
+export const METHODS = [
+  ["zelle", "Zelle"],
+  ["cashapp", "Cash App"],
+  ["venmo", "Venmo"],
+  ["bank", "Bank transfer"],
+  ["cash", "Cash"],
+  ["check", "Check"],
+  ["card", "Card"],
+  ["money_order", "Money order"],
+  ["other", "Other"],
+];
+
+export function methodLabel(value) {
+  return METHODS.find(([key]) => key === value)?.[1] ?? "Other";
+}
+
+const METHOD_HINTS = [
+  ["zelle", /\bzelle\b/],
+  ["cashapp", /\bcash ?app\b|\bsquare cash\b|\bcash out\b/],
+  ["venmo", /\bvenmo\b/],
+  ["check", /\bche(ck|que)\b|\bck#?\d/],
+  ["cash", /\bcash (deposit|dep)\b|\bteller (cash )?dep/],
+  ["card", /\bdebit\b|\bcredit card\b|\bvisa\b|\bmastercard\b/],
+  ["money_order", /\bmoney order\b|\bmo #/],
+  ["bank", /\bach\b|\btransfer\b|\bdirect dep|\bdeposit\b|\bwire\b/],
+];
+
+export function suggestMethod(description) {
+  const text = String(description).toLowerCase();
+  for (const [method, pattern] of METHOD_HINTS) {
+    if (pattern.test(text)) return method;
+  }
+  return "bank";
+}
+
+/**
+ * Scores how likely a deposit belongs to a given charge.
+ *
+ * The tenant's name in the description is the strongest signal; an exact amount
+ * and a nearby due date add confidence.
+ */
+export function matchScore(description, amount, candidate) {
   let score = 0;
-  const haystack = description.toLowerCase();
+  const haystack = String(description).toLowerCase();
   const parts = candidate.tenantName.toLowerCase().split(/\s+/).filter((p) => p.length > 2);
 
   for (const part of parts) {
@@ -338,4 +382,43 @@ export function matchScore(
     else if (days > 60) score -= 10;
   }
   return score;
+}
+
+/**
+ * Pairs each deposit with the charge it most likely settles.
+ *
+ * Only confident pairings are offered, and each charge can only be claimed
+ * once — two rent payments of the same amount in one month must not both be
+ * matched to January's charge, leaving February looking unpaid.
+ */
+export function matchDeposits(rows, charges, people) {
+  const nameOf = new Map(
+    people.map((p) => [p.id, `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim()])
+  );
+  const taken = new Set();
+
+  return rows.map((row) => {
+    if (row.amount <= 0) return { row, charge: null, score: 0 };
+
+    let best = null;
+    for (const charge of charges) {
+      if (taken.has(charge.id) || charge.status === "paid") continue;
+      const score = matchScore(row.description, row.amount, {
+        tenantName: nameOf.get(charge.person) || "",
+        amount: Number(charge.amount) || 0,
+        dueDate: String(charge.due_date ?? ""),
+        postedDate: row.posted_date,
+      });
+      if (!best || score > best.score) best = { charge, score };
+    }
+
+    // 55 is "the amount matches and it arrived on time", or "the name matches
+    // and the amount is close". Below that we would be guessing at the
+    // landlord's books, so the row waits to be assigned by hand.
+    if (best && best.score >= 55) {
+      taken.add(best.charge.id);
+      return { row, charge: best.charge, score: best.score };
+    }
+    return { row, charge: null, score: best?.score ?? 0 };
+  });
 }

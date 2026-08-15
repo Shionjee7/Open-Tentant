@@ -138,3 +138,24 @@ export function update(collection, id, body) {
 export function remove(collection, id) {
   return request(`/collections/${collection}/records/${id}`, { method: "DELETE" });
 }
+
+/**
+ * Create and update with an attached file.
+ *
+ * PocketBase takes uploads as multipart, so the body goes over as FormData and
+ * `request` leaves the Content-Type alone — the browser has to set it itself,
+ * because it carries the multipart boundary.
+ */
+export function createWithFile(collection, formData) {
+  return request(`/collections/${collection}/records`, { method: "POST", body: formData });
+}
+
+export function updateWithFile(collection, id, formData) {
+  return request(`/collections/${collection}/records/${id}`, { method: "PATCH", body: formData });
+}
+
+/** Where PocketBase serves an uploaded file from. */
+export function fileUrl(collection, recordId, filename) {
+  if (!filename) return "";
+  return `/api/files/${collection}/${recordId}/${encodeURIComponent(filename)}`;
+}

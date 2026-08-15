@@ -9,8 +9,7 @@
 
 import * as api from "./api.js";
 import { esc, money, moneyExact, shortDate, sumBy, titleCase } from "./lib.js";
-
-const CATEGORIES = ["repairs", "utilities", "insurance", "taxes", "mortgage", "turnover", "other"];
+import { CATEGORIES, METHODS } from "./statements.js";
 
 function field(label, name, value = "", type = "text", extra = "") {
   return `
@@ -266,6 +265,201 @@ export async function rentForm() {
   );
 }
 
+/**
+ * Edit one charge.
+ *
+ * Rent is not always what was scheduled. Somebody pays half now and half on
+ * Friday, a late fee gets waived, a payment lands in the wrong month. Without
+ * this the only fix was the database.
+ */
+export async function paymentForm(id) {
+  const charge = await api.one("payments", id);
+  if (!charge) return `<div class="card empty">That charge no longer exists.</div>`;
+
+  const [people, leases, properties] = await Promise.all([
+    api.list("people"),
+    api.list("leases"),
+    api.list("properties"),
+  ]);
+  const person = people.find((p) => p.id === charge.person);
+  const name = person ? `${person.first_name ?? ""} ${person.last_name ?? ""}`.trim() : "Unassigned";
+  const home = properties.find((p) => p.id === (leases.find((l) => l.id === charge.lease)?.property || person?.property));
+  const back = charge.person ? `#/tenant/${charge.person}` : "#/rent";
+
+  return (
+    `<a href="${esc(back)}" class="small" style="color:var(--brand-600);display:inline-block;margin-bottom:.75rem">← Back</a>` +
+    `<div class="page-head"><div><h1>Edit this charge</h1>
+      <p class="sub">${esc(name)}${home ? ` · ${esc(home.name)}` : ""}</p></div></div>` +
+    `<form data-form="payment" data-id="${esc(id)}" class="card card-body" style="max-width:38rem">
+      <div class="field">
+        <label for="f-person">Who owes it?</label>
+        <select id="f-person" name="person">
+          <option value="">Unassigned</option>
+          ${people
+            .filter((p) => !p.archived || p.id === charge.person)
+            .map(
+              (p) =>
+                `<option value="${esc(p.id)}"${p.id === charge.person ? " selected" : ""}>${esc(
+                  `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim()
+                )}</option>`
+            )
+            .join("")}
+        </select>
+      </div>
+
+      <div class="grid grid-sm-2" style="gap:.85rem">
+        ${field("Amount ($)", "amount", charge.amount ?? "", "number", 'min="0" step="0.01" required')}
+        ${field("Due date", "due_date", charge.due_date ?? "", "date")}
+      </div>
+
+      <div class="grid grid-sm-2" style="gap:.85rem">
+        <div class="field">
+          <label for="f-type">What is it?</label>
+          <select id="f-type" name="type">
+            ${["rent", "deposit", "late_fee", "utility", "other"]
+              .map((t) => `<option value="${t}"${charge.type === t ? " selected" : ""}>${titleCase(t)}</option>`)
+              .join("")}
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-status">Where does it stand?</label>
+          <select id="f-status" name="status">
+            ${["unpaid", "paid", "partial", "late", "waived"]
+              .map((s) => `<option value="${s}"${charge.status === s ? " selected" : ""}>${titleCase(s)}</option>`)
+              .join("")}
+          </select>
+        </div>
+      </div>
+
+      <div class="grid grid-sm-2" style="gap:.85rem">
+        <div class="field">
+          <label for="f-method">How did they pay?</label>
+          <select id="f-method" name="method">
+            <option value="">Not recorded</option>
+            ${METHODS.map(
+              ([key, label]) => `<option value="${key}"${charge.method === key ? " selected" : ""}>${esc(label)}</option>`
+            ).join("")}
+          </select>
+        </div>
+        ${field("Date they paid", "paid_date", charge.paid_date ?? "", "date")}
+      </div>
+
+      ${field("Note", "notes", charge.notes ?? "", "text", 'placeholder="Half now, half on Friday"')}
+
+      <p class="small muted" style="margin-top:.85rem">
+        Marking this paid books it as income. Changing it back takes that income
+        out again, so the month stays honest either way.
+      </p>
+
+      <div style="margin-top:1.5rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+        <button class="btn" type="submit">Save changes</button>
+        <a class="btn-secondary" href="${esc(back)}">Cancel</a>
+        <button type="button" class="btn-secondary" data-action="delete-payment"
+          data-id="${esc(id)}" data-name="${esc(name)}" data-amount="${esc(moneyExact(charge.amount))}"
+          style="margin-left:auto;color:var(--out);border-color:#f3c7c0">Delete charge</button>
+        <span class="small muted" data-role="status"></span>
+      </div>
+    </form>`
+  );
+}
+
+/** Start a lease, or edit one. */
+export async function leaseForm(id, presetPerson = "") {
+  const lease = id ? await api.one("leases", id) : null;
+  if (id && !lease) return `<div class="card empty">That lease no longer exists.</div>`;
+
+  const [properties, units, people] = await Promise.all([
+    api.list("properties"),
+    api.list("units"),
+    api.list("people"),
+  ]);
+  const live = properties.filter((p) => !p.archived);
+  const tenants = people.filter((p) => !p.archived);
+  const chosen = new Set(lease?.tenants ?? (presetPerson ? [presetPerson] : []));
+  const person = people.find((p) => p.id === presetPerson);
+  const today = new Date().toISOString().slice(0, 10);
+  const nextYear = new Date();
+  nextYear.setFullYear(nextYear.getFullYear() + 1);
+
+  return (
+    `<a href="${presetPerson ? `#/tenant/${esc(presetPerson)}` : "#/properties"}" class="small"
+        style="color:var(--brand-600);display:inline-block;margin-bottom:.75rem">← Back</a>` +
+    `<div class="page-head"><div><h1>${id ? "Edit lease" : "Start a lease"}</h1>
+      <p class="sub">Who is renting what, for how long, at what rent.</p></div></div>` +
+    `<form data-form="lease" ${id ? `data-id="${esc(id)}"` : ""} class="card card-body" style="max-width:40rem">
+      <div class="field">
+        <label for="f-property">Which property?</label>
+        <select id="f-property" name="property" data-role="property-picker" required>
+          <option value="">Choose one</option>
+          ${live
+            .map(
+              (p) =>
+                `<option value="${esc(p.id)}"${
+                  (lease?.property || person?.property) === p.id ? " selected" : ""
+                }>${esc(p.name)}</option>`
+            )
+            .join("")}
+        </select>
+      </div>
+
+      <div class="field" data-role="room-field">
+        <label for="f-unit">Which room? <span class="muted" style="text-transform:none">— only for by-the-room houses</span></label>
+        <select id="f-unit" name="unit">
+          <option value="">The whole place</option>
+          ${units
+            .map(
+              (u) =>
+                `<option value="${esc(u.id)}" data-property="${esc(u.property)}"${
+                  (lease?.unit || person?.unit) === u.id ? " selected" : ""
+                }>${esc(u.name)}</option>`
+            )
+            .join("")}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Who is on it?</label>
+        <div class="checks">
+          ${tenants
+            .map(
+              (t) => `
+            <label class="check">
+              <input type="checkbox" name="tenant-${esc(t.id)}" ${chosen.has(t.id) ? "checked" : ""} />
+              <span>${esc(`${t.first_name ?? ""} ${t.last_name ?? ""}`.trim())}</span>
+            </label>`
+            )
+            .join("")}
+        </div>
+        ${tenants.length === 0 ? `<p class="small muted">Add a person first — a lease needs somebody on it.</p>` : ""}
+      </div>
+
+      <div class="grid grid-sm-2" style="gap:.85rem">
+        ${field("Starts", "start_date", lease?.start_date ?? today, "date", "required")}
+        ${field("Ends", "end_date", lease?.end_date ?? nextYear.toISOString().slice(0, 10), "date")}
+      </div>
+      <div class="grid grid-sm-2" style="gap:.85rem">
+        ${field("Monthly rent ($)", "rent", lease?.rent ?? "", "number", 'min="0" step="0.01"')}
+        ${field("Deposit held ($)", "deposit", lease?.deposit ?? "", "number", 'min="0" step="0.01"')}
+      </div>
+
+      <div class="field">
+        <label for="f-status">Where does it stand?</label>
+        <select id="f-status" name="status">
+          ${["draft", "sent", "signed", "active", "ended"]
+            .map((s) => `<option value="${s}"${(lease?.status ?? "active") === s ? " selected" : ""}>${titleCase(s)}</option>`)
+            .join("")}
+        </select>
+      </div>
+
+      <div style="margin-top:1.5rem;display:flex;gap:.6rem;align-items:center">
+        <button class="btn" type="submit">${id ? "Save lease" : "Start it"}</button>
+        <a class="btn-secondary" href="${presetPerson ? `#/tenant/${esc(presetPerson)}` : "#/properties"}">Cancel</a>
+        <span class="small muted" data-role="status"></span>
+      </div>
+    </form>`
+  );
+}
+
 /* ---------------- saving ---------------- */
 
 export async function saveProperty(id, data) {
@@ -404,6 +598,107 @@ export async function scheduleRent(data) {
     });
   }
   return person;
+}
+
+/* ---------------- saving the newer forms ---------------- */
+
+/**
+ * Saves a charge, keeping the books in step.
+ *
+ * Marking a charge paid books income; taking it back off paid removes that
+ * income again. Skipping the second half is how a landlord ends up with a month
+ * that shows rent they never received.
+ */
+export async function savePayment(id, data) {
+  const before = await api.one("payments", id);
+  const wasPaid = before?.status === "paid";
+  const nowPaid = data.status === "paid";
+
+  const charge = await api.update("payments", id, {
+    person: data.person ?? "",
+    amount: Number(data.amount) || 0,
+    due_date: data.due_date ?? "",
+    type: data.type || "rent",
+    status: data.status || "unpaid",
+    method: data.method ?? "",
+    paid_date: nowPaid ? data.paid_date || new Date().toISOString().slice(0, 10) : "",
+    notes: data.notes ?? "",
+  });
+
+  const booked = (await api.list("transactions")).filter((t) => t.payment === id);
+
+  if (nowPaid) {
+    const lease = charge.lease ? await api.one("leases", charge.lease) : null;
+    const person = charge.person ? await api.one("people", charge.person) : null;
+    const body = {
+      property: lease?.property || person?.property || "",
+      date: charge.paid_date,
+      type: "income",
+      category: charge.type || "rent",
+      amount: charge.amount,
+      description: charge.method ? `${titleCase(charge.type || "rent")} — ${methodName(charge.method)}` : titleCase(charge.type || "rent"),
+      payment: id,
+    };
+    // One income record per charge, updated rather than added to, so editing an
+    // amount twice doesn't count it twice.
+    if (booked[0]) await api.update("transactions", booked[0].id, body);
+    else await api.create("transactions", body);
+    for (const extra of booked.slice(1)) await api.remove("transactions", extra.id);
+  } else if (wasPaid || booked.length > 0) {
+    for (const t of booked) await api.remove("transactions", t.id);
+  }
+
+  return charge;
+}
+
+function methodName(value) {
+  return METHODS.find(([key]) => key === value)?.[1] ?? "Other";
+}
+
+/** Deletes a charge and any income it booked. */
+export async function deletePayment(id) {
+  const booked = (await api.list("transactions")).filter((t) => t.payment === id);
+  for (const t of booked) await api.remove("transactions", t.id);
+  await api.remove("payments", id);
+}
+
+export async function saveLease(id, data) {
+  const tenants = Object.keys(data)
+    .filter((key) => key.startsWith("tenant-") && data[key] === "on")
+    .map((key) => key.slice("tenant-".length));
+
+  const body = {
+    property: data.property,
+    unit: data.unit ?? "",
+    tenants,
+    start_date: data.start_date ?? "",
+    end_date: data.end_date ?? "",
+    rent: Number(data.rent) || 0,
+    deposit: Number(data.deposit) || 0,
+    status: data.status || "active",
+  };
+  const lease = id ? await api.update("leases", id, body) : await api.create("leases", body);
+
+  // A signed lease means somebody lives there; keep the property and room in step.
+  if (body.status === "active" || body.status === "signed") {
+    if (body.property) await api.update("properties", body.property, { status: "occupied" });
+    if (body.unit) await api.update("units", body.unit, { status: "occupied" });
+  }
+  return lease;
+}
+
+/**
+ * Takes one person off a lease, leaving the lease itself alone.
+ *
+ * The lease is the agreement the rent was charged under, and the other tenants
+ * are still on it. Deleting it to remove one person would take the terms of
+ * every charge already made with it.
+ */
+export async function leaveLease(leaseId, personId) {
+  const lease = await api.one("leases", leaseId);
+  if (!lease) return null;
+  const tenants = (lease.tenants ?? []).filter((t) => t !== personId);
+  return api.update("leases", leaseId, { tenants });
 }
 
 export { CATEGORIES };

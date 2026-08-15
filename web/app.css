@@ -210,6 +210,10 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .small { font-size: 0.8rem; }
 .right { text-align: right; }
 .empty { padding: 2.5rem 1.25rem; text-align: center; color: var(--ink-500); }
+/* An empty section under its own heading needs less air than an empty page —
+   a person's page has several of them, and full-size gaps push the things that
+   do have content off the bottom of the screen. */
+.card-head + .empty { padding: 1.5rem 1.25rem; }
 
 /* Month rows */
 .months li {
@@ -347,6 +351,73 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand-500); outl
     overflow: hidden; clip-path: inset(50%); white-space: nowrap;
   }
 }
+
+/* Drop a file here */
+.drop {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  align-items: center; justify-content: center;
+  padding: 1.5rem 1rem; margin: 0;
+  border: 1.5px dashed #cbd5e1; border-radius: var(--radius);
+  background: #fbfcfe; cursor: pointer;
+  text-align: center; text-transform: none; letter-spacing: normal;
+  transition: border-color 0.15s, background 0.15s;
+}
+.drop:hover, .drop.over { border-color: var(--brand-500); background: var(--brand-50); }
+.drop-t { font-size: 0.9rem; font-weight: 600; color: var(--ink-700); }
+.drop-s { font-size: 0.78rem; color: var(--ink-500); }
+.drop-name:not(:empty) {
+  margin-top: 0.4rem; padding: 0.2rem 0.55rem; border-radius: 999px;
+  background: var(--brand-100); color: var(--brand-700); font-weight: 500;
+}
+
+/* Tick boxes, for the people on a lease */
+.checks { display: grid; gap: 0.4rem; }
+@media (min-width: 640px) { .checks { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.check {
+  display: flex; gap: 0.5rem; align-items: center;
+  margin: 0; padding: 0.5rem 0.7rem;
+  border: 1px solid #cbd5e1; border-radius: 0.6rem;
+  font: inherit; font-size: 0.88rem; font-weight: 400;
+  text-transform: none; letter-spacing: normal; color: var(--ink-900);
+  cursor: pointer;
+}
+.check input { width: auto; flex-shrink: 0; accent-color: var(--brand-600); }
+.check:has(input:checked) { border-color: var(--brand-500); background: var(--brand-50); }
+
+/* One statement row, waiting to be booked */
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.importlist { display: flex; flex-direction: column; }
+.imported {
+  display: grid; gap: 0.5rem 0.9rem;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "pick what amt" "sort sort sort";
+  align-items: center;
+  padding: 0.85rem 1.25rem;
+  border-top: 1px solid var(--line-soft);
+}
+.importlist > .imported:first-child { border-top: 0; }
+.imported.dup { background: var(--warn-bg); }
+.imported .pick { grid-area: pick; margin: 0; padding: 0; }
+.imported .pick input { width: 1.1rem; height: 1.1rem; accent-color: var(--brand-600); }
+.imported .what { grid-area: what; min-width: 0; }
+.imported .what .t { font-size: 0.9rem; font-weight: 500; overflow-wrap: anywhere; }
+.imported .what .s { font-size: 0.76rem; color: var(--ink-500); }
+.imported .amt { grid-area: amt; font-weight: 600; white-space: nowrap; }
+.imported .sort { grid-area: sort; display: grid; gap: 0.5rem; }
+.imported .sort select { font-size: 0.85rem; }
+
+@media (min-width: 900px) {
+  .imported {
+    grid-template-columns: auto minmax(0, 1fr) 7rem minmax(0, 31rem);
+    grid-template-areas: "pick what amt sort";
+  }
+  .imported .amt { text-align: right; }
+  /* "Marcus Webb — $1,850.00 due Aug 1" needs more room than "Zelle" does.
+     Splitting the space evenly clipped the half that carries the meaning. */
+  .imported .sort { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+}
+/* A clipped option reads as a typo; an ellipsis reads as "there's more". */
+.imported .sort select { text-overflow: ellipsis; }
 
 /* Tabs inside one property */
 .tabs { display: flex; gap: 0.25rem; overflow-x: auto; border-bottom: 1px solid var(--line); margin-bottom: 1.25rem; }
