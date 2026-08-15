@@ -584,6 +584,10 @@ async function screenProperty() {
   const kept = sumBy(income, (t) => t.amount) - sumBy(costs, (t) => t.amount);
 
   const requests = (await api.list("maintenance_requests")).filter((r) => r.property === id);
+  // Which account this house's rent lands in — read here, edited in Bank. One
+  // record with two edit screens is a record that ends up disagreeing with
+  // itself.
+  const account = (await api.list("bank_accounts")).find((a) => a.property === id) ?? null;
   const openJobs = requests.filter((r) => r.status === "new" || r.status === "in_progress");
 
   const byRoom = property.rental_type === "by_room" || rooms.length > 0;
@@ -617,6 +621,12 @@ async function screenProperty() {
         <div class="grid grid-sm-2" style="margin-top:.85rem">
           <div><span class="hero-k">Address</span><div>${esc([property.address, property.city, property.state, property.zip].filter(Boolean).join(", ") || "—")}</div></div>
           <div><span class="hero-k">Rented as</span><div>${property.rental_type === "by_room" ? "By the room" : "The whole place"}</div></div>
+          <div>
+            <span class="hero-k">Rent lands in</span>
+            <div>${account
+              ? `<a href="#/bank/${esc(account.id)}" style="color:var(--brand-600)">${esc(account.name)}${account.last4 ? ` ····${esc(account.last4)}` : ""} →</a>`
+              : `<a href="#/bank/new" style="color:var(--brand-600)">No account set — add one →</a>`}</div>
+          </div>
         </div>
         <div style="margin-top:1.25rem;border-top:1px solid var(--line-soft);padding-top:1rem">
           <button class="btn-secondary" data-action="delete-property"

@@ -31,8 +31,6 @@ export async function propertyForm(id) {
   if (id && !property) return `<div class="card empty">That property no longer exists.</div>`;
 
   const rooms = id ? (await api.list("units")).filter((u) => u.property === id) : [];
-  const accounts = id ? (await api.list("bank_accounts")).filter((a) => a.property === id) : [];
-  const account = accounts[0] ?? null;
   const byRoom = property ? property.rental_type === "by_room" : false;
 
   return (
@@ -89,17 +87,6 @@ export async function propertyForm(id) {
              ${field("Deposit per room ($)", "room_deposit", "", "number", 'min="0" step="0.01"')}
              <p class="small muted">Rooms are created for you, named Room 1, Room 2 and so on. You can rename them and set a different rent per room afterwards.</p>`}
       </div>
-
-      <h2 style="margin-top:1.75rem">Where the rent lands</h2>
-      <p class="small muted" style="margin-top:.2rem">
-        The account this property's rent is deposited into. Never enter a full account number —
-        the last four digits are enough to tell accounts apart.
-      </p>
-      <div class="grid grid-sm-2" style="gap:.85rem;margin-top:.85rem">
-        ${field("Account nickname", "account_name", account?.name ?? "", "text", 'placeholder="Rent checking"')}
-        ${field("Bank", "account_institution", account?.institution ?? "", "text", 'placeholder="Chase"')}
-      </div>
-      ${field("Last 4 digits", "account_last4", account?.last4 ?? "", "text", 'inputmode="numeric" maxlength="4" placeholder="4821"')}
 
       <div style="margin-top:1.5rem;display:flex;gap:.6rem;align-items:center">
         <button class="btn" type="submit">${id ? "Save changes" : "Add property"}</button>
@@ -495,19 +482,6 @@ export async function saveProperty(id, data) {
       });
     }
   }
-
-  // Where the rent lands. One account per property, updated rather than piled up.
-  const nickname = (data.account_name ?? "").trim();
-  const accounts = (await api.list("bank_accounts")).filter((a) => a.property === property.id);
-  const accountBody = {
-    name: nickname,
-    institution: (data.account_institution ?? "").trim(),
-    last4: (data.account_last4 ?? "").replace(/\D/g, "").slice(-4),
-    property: property.id,
-    kind: "bank",
-  };
-  if (nickname && accounts[0]) await api.update("bank_accounts", accounts[0].id, accountBody);
-  else if (nickname) await api.create("bank_accounts", accountBody);
 
   return property;
 }
