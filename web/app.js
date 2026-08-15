@@ -37,6 +37,7 @@ import {
   screenBank,
 } from "./bank.js";
 import { CATEGORIES, categoryLabel, methodLabel } from "./statements.js";
+import { VERSION } from "./version.js";
 
 const NAV = [
   { href: "#/", label: "Home", icon: "▦", hint: "This month at a glance" },
@@ -104,6 +105,7 @@ function shell(inner) {
         <div class="sidebar-foot">
           ${user ? `<div>${esc(user.email)}</div>` : ""}
           <button type="button" data-action="sign-out">Sign out</button>
+          <div class="version">OpenTenant v${esc(VERSION)}</div>
         </div>
       </aside>
       ${menuOpen ? '<button class="scrim" data-action="close-menu" aria-label="Close menu"></button>' : ""}
@@ -1111,7 +1113,7 @@ function signInScreen(message = "") {
           <span class="brand-mark">O</span>
           <span>
             <span class="brand-name" style="color:var(--ink-900)">OpenTenant</span>
-            <span class="brand-sub" style="color:var(--ink-500)">Free · Open Source</span>
+            <span class="brand-sub" style="color:var(--ink-500)">Free · Open Source · v${esc(VERSION)}</span>
           </span>
         </div>
         <h2>Sign in</h2>

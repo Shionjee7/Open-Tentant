@@ -1,6 +1,6 @@
 {
   "name": "opentenant",
-  "version": "0.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Open-source property management software for landlords — listings, applications, screening, leases, rent collection, maintenance, and accounting. Free and self-hosted.",
   "license": "MIT",
@@ -15,6 +15,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
+    "bump": "node scripts/bump.mjs",
+    "version:check": "node scripts/bump.mjs --check",
     "esign": "node scripts/esign.mjs",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:headed": "npm run build && playwright test --headed"

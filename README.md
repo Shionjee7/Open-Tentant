@@ -85,6 +85,24 @@ The database schema is versioned in `pb/pb_migrations/` and travels with the Git
 The actual tenant and financial records stay in the ignored `data/` folder so private information
 is never committed accidentally.
 
+### Version
+
+The running version is shown in the sidebar and on the sign-in screen, so anyone
+reporting a problem can say what they have. It lives in two files — `package.json`
+and `web/version.js`, because the browser app has no build step and cannot read
+`package.json` — and one command moves both:
+
+```bash
+npm run bump           # 1.1.0 → 1.1.1, on every push
+npm run bump minor     # 1.1.1 → 1.2.0, for a batch of work
+npm run bump major     # 1.2.0 → 2.0.0
+npm run bump 1.4.2     # straight to a version you name
+npm run version:check  # fails if the two files ever disagree
+```
+
+Don't edit either file by hand: `bump` refuses to run once they have drifted apart,
+and tells you how to put them back.
+
 ## Test the complete landlord workflow
 
 ```bash

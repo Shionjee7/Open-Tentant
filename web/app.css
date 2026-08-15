@@ -115,6 +115,9 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
   background: none; border: 0; color: #94a3b8; cursor: pointer;
   font: inherit; padding: 0; text-decoration: underline;
 }
+/* Which version you are running, where a version number belongs: out of the
+   way, but there when something looks wrong and you need to say what you have. */
+.version { margin-top: 0.6rem; font-size: 0.68rem; color: #64748b; letter-spacing: 0.02em; }
 
 .scrim {
   position: fixed; inset: 0; z-index: 40;
