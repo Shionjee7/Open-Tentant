@@ -27,17 +27,25 @@ import {
   tenantForm,
 } from "./forms.js";
 import { screenPerson } from "./person.js";
-import { bookStatement, clearReview, readStatement, screenBank } from "./bank.js";
+import {
+  accountForm,
+  bookStatement,
+  clearReview,
+  readStatement,
+  saveAccount,
+  screenAccount,
+  screenBank,
+} from "./bank.js";
 import { CATEGORIES, categoryLabel, methodLabel } from "./statements.js";
 
 const NAV = [
   { href: "#/", label: "Home", icon: "▦", hint: "This month at a glance" },
-  { href: "#/money", label: "Money", icon: "$", hint: "What you kept, month by month" },
-  { href: "#/rent", label: "Rent", icon: "◷", hint: "Who has paid and who hasn't" },
-  { href: "#/bank", label: "Bank", icon: "▤", hint: "Import statements, sort the bills" },
+  { href: "#/money", label: "Money", icon: "$", hint: "What each house makes" },
+  { href: "#/rent", label: "Rent", icon: "◷", hint: "Who has paid, house by house" },
+  { href: "#/bank", label: "Bank", icon: "▤", hint: "Your accounts and their statements" },
   { href: "#/properties", label: "Properties", icon: "⌂", hint: "Your places and rooms" },
   { href: "#/tenants", label: "Tenants", icon: "☺", hint: "Who lives where" },
-  { href: "#/repairs", label: "Repairs", icon: "⚒", hint: "Requests from you or tenants" },
+  { href: "#/repairs", label: "Repairs & docs", icon: "⚒", hint: "Jobs and paperwork, per house" },
   { href: "#/settings", label: "Settings", icon: "⚙", hint: "Your details and setup" },
 ];
 
@@ -59,6 +67,7 @@ function routeParams() {
 
 /** The menu entry a page belongs to, so a sub-page still lights one up. */
 function navFor(route) {
+  if (route.startsWith("/bank/")) return NAV.find((i) => i.href === "#/bank");
   if (route.startsWith("/property/")) return NAV.find((i) => i.href === "#/properties");
   if (route.startsWith("/tenant/") || route.startsWith("/lease/")) return NAV.find((i) => i.href === "#/tenants");
   if (route.startsWith("/rent/") || route.startsWith("/payment/")) return NAV.find((i) => i.href === "#/rent");
@@ -148,14 +157,6 @@ function steps(items) {
     .join("")}</ol>`;
 }
 
-function hub(links) {
-  return `<nav class="hub">${links
-    .map(
-      (l) => `<a href="${l.href}"><div class="t">${esc(l.label)}</div><div class="s">${esc(l.detail)}</div></a>`
-    )
-    .join("")}</nav>`;
-}
-
 /* ---------------- screens ---------------- */
 
 async function loadMoney() {
@@ -219,20 +220,62 @@ async function screenHome() {
   );
 }
 
+/**
+ * The houses, with one section's figures on each.
+ *
+ * Every top-level screen is the same shape: the portfolio total first, then a
+ * row per house, then you click through to that house. Before this, Money was
+ * one lump sum and Rent was one long list, and working out which house was
+ * carrying which meant holding it all in your head.
+ */
+function houseRows(properties, tab, figures) {
+  if (properties.length === 0) {
+    return `<div class="card empty">
+      No properties yet. <a href="#/property/new" style="color:var(--brand-600)">Add the first one →</a>
+    </div>`;
+  }
+  return `<section class="card"><ul class="rows">${properties
+    .map((p) => {
+      const f = figures(p);
+      return `
+      <li>
+        <a href="#/property/${esc(p.id)}?tab=${tab}" style="flex:1;min-width:0">
+          <div class="t">${esc(p.name)} <span class="muted small">→</span></div>
+          <div class="s">${esc(f.detail)}</div>
+        </a>
+        <div style="display:flex;align-items:center;gap:.75rem;text-align:right">
+          <div>
+            <div style="font-weight:600;${f.tone ? `color:var(--${f.tone})` : ""}">${esc(f.value)}</div>
+            ${f.hint ? `<div class="s">${esc(f.hint)}</div>` : ""}
+          </div>
+        </div>
+      </li>`;
+    })
+    .join("")}</ul></section>`;
+}
+
 async function screenMoney() {
-  const { transactions, rows } = await loadMoney();
+  const [{ transactions, rows }, properties, payments, leases, people] = await Promise.all([
+    loadMoney(),
+    api.list("properties"),
+    api.list("payments"),
+    api.list("leases"),
+    api.list("people"),
+  ]);
+  const live = properties.filter((p) => !p.archived);
+  const houseOf = chargeHouse(leases, people);
   const started = rows.some((r) => r.income > 0 || r.expenses > 0);
 
   if (!started) {
     return (
-      head("Money", "What came in, what went out, and what you kept.") +
+      head("Money", "What each house makes, and what the lot of them make together.") +
       `<div class="card card-body">
         <h2>Nothing to count yet</h2>
         <p class="sub muted" style="margin-top:.35rem">Mark some rent as paid, and the months fill in.</p>
         ${steps([
           { href: "#/properties", label: "Add a property", detail: "Skip if your houses are already in." },
           { href: "#/rent", label: "Schedule the rent", detail: "Set it once for the year." },
-          { href: "#/rent", label: "Tick off who paid", detail: "Each payment books itself as income." },
+          { href: "#/bank", label: "Or import a statement", detail: "It sorts the bills and the rent for you." },
         ])}
       </div>`
     );
@@ -245,14 +288,18 @@ async function screenMoney() {
   const kept = sumBy(transactions.filter((t) => t.type === "income"), (t) => t.amount)
     - sumBy(transactions.filter((t) => t.type === "expense"), (t) => t.amount);
 
+  // Money that never got a property on it — an old expense, a deposit returned
+  // — would silently vanish from a per-house view, so it is named instead.
+  const unassigned = transactions.filter((t) => !t.property);
+
   return (
-    head("Money", "What came in, what went out, and what you kept.") +
+    head("Money", "The whole portfolio first, then each house.") +
     `<section class="card">
       <div class="card-body" style="display:flex;flex-wrap:wrap;gap:2rem;justify-content:space-between;align-items:flex-end">
         <div>
           <div class="hero-k">Kept in ${esc(monthLabel(thisMonth.month))} so far</div>
           <div class="hero-v ${thisMonth.net < 0 ? "bad" : ""}">${esc(money(thisMonth.net))}</div>
-          <div class="hero-sub">${esc(money(thisMonth.income))} in · ${esc(money(thisMonth.expenses))} out</div>
+          <div class="hero-sub">${esc(money(thisMonth.income))} in · ${esc(money(thisMonth.expenses))} out · everything together</div>
         </div>
         <dl style="display:flex;flex-wrap:wrap;gap:2rem">
           <div>
@@ -274,12 +321,42 @@ async function screenMoney() {
           </div>
         </dl>
       </div>
-    </section>
-    <section class="card">
-      <div class="card-head"><h2>Month by month</h2></div>
-      ${renderMonths(rows)}
-    </section>`
+      <div style="border-top:1px solid var(--line-soft)">${renderMonths(rows)}</div>
+    </section>` +
+    `<h2 style="margin:1.75rem 0 .85rem">House by house</h2>` +
+    houseRows(live, "money", (p) => {
+      const mine = transactions.filter((t) => t.property === p.id);
+      const income = sumBy(mine.filter((t) => t.type === "income"), (t) => t.amount);
+      const spent = sumBy(mine.filter((t) => t.type === "expense"), (t) => t.amount);
+      const owed = payments.filter((c) => c.status !== "paid" && houseOf(c) === p.id);
+      return {
+        value: money(income - spent),
+        hint: "kept all time",
+        tone: income - spent < 0 ? "out" : "",
+        detail: `${money(income)} in · ${money(spent)} out${owed.length ? ` · ${money(sumBy(owed, (c) => c.amount))} still owed` : ""}`,
+      };
+    }) +
+    (unassigned.length > 0
+      ? `<p class="small muted" style="margin-top:1rem">
+          ${unassigned.length} entr${unassigned.length === 1 ? "y is" : "ies are"} not filed against a house,
+          worth ${esc(money(sumBy(unassigned.filter((t) => t.type === "income"), (t) => t.amount) - sumBy(unassigned.filter((t) => t.type === "expense"), (t) => t.amount)))}.
+          They count in the portfolio total above but appear under no house.
+        </p>`
+      : "")
   );
+}
+
+/**
+ * Which house a charge belongs to.
+ *
+ * Its lease says so when it has one. When it doesn't — rent scheduled before a
+ * lease existed, which is most of it early on — the person it is charged to
+ * says instead. Without the fallback, a house's rent silently reads as zero.
+ */
+function chargeHouse(leases, people) {
+  const byLease = new Map(leases.map((l) => [l.id, l.property]));
+  const byPerson = new Map(people.map((p) => [p.id, p.property]));
+  return (charge) => (charge.lease && byLease.get(charge.lease)) || byPerson.get(charge.person) || "";
 }
 
 async function screenRent() {
@@ -291,75 +368,52 @@ async function screenRent() {
   ]);
 
   const live = properties.filter((p) => !p.archived);
-  const chosen = routeParams().get("property") || "";
   const month = routeParams().get("month") || monthKey();
-  const propertyOf = new Map(leases.map((l) => [l.id, l.property]));
-  const personHome = new Map(people.map((p) => [p.id, p.property]));
-  const person = new Map(people.map((p) => [p.id, p]));
-
-  const houseOf = (charge) =>
-    (charge.lease && propertyOf.get(charge.lease)) || personHome.get(charge.person) || "";
+  const houseOf = chargeHouse(leases, people);
 
   const inMonth = payments.filter((c) => String(c.due_date ?? "").slice(0, 7) === month);
-  const rows = chosen ? inMonth.filter((c) => houseOf(c) === chosen) : inMonth;
-  const paid = rows.filter((c) => c.status === "paid");
-  const owed = rows.filter((c) => c.status !== "paid");
+  const paid = inMonth.filter((c) => c.status === "paid");
+  const owed = inMonth.filter((c) => c.status !== "paid");
 
-  const picker = `
-    <form data-form="rent-filter" class="card card-body" style="display:flex;flex-wrap:wrap;gap:.85rem;align-items:flex-end;margin-bottom:1.25rem">
-      <div class="field" style="margin:0;min-width:14rem;flex:1">
-        <label for="f-house">Property</label>
-        <select id="f-house" name="property">
-          <option value="">All properties</option>
-          ${live.map((p) => `<option value="${esc(p.id)}"${p.id === chosen ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
-        </select>
-      </div>
+  return (
+    head(
+      "Rent",
+      "Everything owed this month, then house by house",
+      `<a class="btn" href="#/rent/new">+ Schedule rent</a>`
+    ) +
+    `<form data-form="rent-filter" class="card card-body" style="display:flex;flex-wrap:wrap;gap:.85rem;align-items:flex-end;margin-bottom:1.25rem">
       <div class="field" style="margin:0">
         <label for="f-month">Month</label>
         <input id="f-month" name="month" type="month" value="${esc(month)}" />
       </div>
       <button class="btn-secondary" type="submit">Show</button>
-    </form>`;
-
-  const heading = chosen ? live.find((p) => p.id === chosen)?.name ?? "Property" : "All properties";
-
-  return (
-    head(
-      "Rent",
-      "Pick a house, see who owes what",
-      `<a class="btn" href="#/rent/new">+ Schedule rent</a>`
-    ) +
-    picker +
+      <p class="small muted" style="flex-basis:100%;margin:0">
+        Open a house below to see its tenants, tick off what they've paid, and fix anything that's wrong.
+      </p>
+    </form>` +
     `<div class="grid grid-2 grid-md-4" style="margin-bottom:1.25rem">
-      ${stat("Rent due", money(sumBy(rows, (c) => c.amount)), `${esc(heading)}, ${esc(monthLabel(month))}`)}
-      ${stat("Received", money(sumBy(paid, (c) => c.amount)), `${paid.length} of ${rows.length}`, "good")}
+      ${stat("Rent due", money(sumBy(inMonth, (c) => c.amount)), `everything, ${esc(monthLabel(month))}`)}
+      ${stat("Received", money(sumBy(paid, (c) => c.amount)), `${paid.length} of ${inMonth.length}`, "good")}
       ${stat("Still owed", money(sumBy(owed, (c) => c.amount)), `${owed.length} charge${owed.length === 1 ? "" : "s"}`, owed.length ? "bad" : "")}
-      ${stat("People", new Set(rows.map((c) => c.person)).size)}
+      ${stat("People paying", new Set(inMonth.map((c) => c.person)).size)}
     </div>` +
-    (rows.length === 0
-      ? `<div class="card empty">Nothing scheduled for ${esc(monthLabel(month))}${chosen ? " at this property" : ""}.</div>`
-      : `<section class="card"><ul class="rows">${rows
-          .map((c) => {
-            const who = person.get(c.person);
-            const name = who ? `${who.first_name ?? ""} ${who.last_name ?? ""}`.trim() : "Unassigned";
-            const home = live.find((p) => p.id === houseOf(c));
-            return `
-            <li>
-              <div style="min-width:0">
-                ${who
-                  ? `<a class="t" href="#/tenant/${esc(who.id)}" style="color:var(--brand-700)">${esc(name)} →</a>`
-                  : `<div class="t">${esc(name)}</div>`}
-                <div class="s">${who?.email ? esc(who.email) : "No email"}${home ? ` · ${esc(home.name)}` : ""}</div>
-                <div class="s">${esc(titleCase(c.type || "rent"))} · due ${esc(shortDate(c.due_date))}</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:.6rem">
-                <span style="font-weight:600">${esc(moneyExact(c.amount))}</span>
-                <span class="tag ${c.status === "paid" ? "good" : "bad"}">${esc(titleCase(c.status))}</span>
-                ${c.status !== "paid" ? `<button class="btn" data-action="mark-paid" data-id="${esc(c.id)}">Mark paid</button>` : ""}
-              </div>
-            </li>`;
-          })
-          .join("")}</ul></section>`)
+    `<h2 style="margin:1.75rem 0 .85rem">House by house</h2>` +
+    houseRows(live, `rent&month=${esc(month)}`, (p) => {
+      const mine = inMonth.filter((c) => houseOf(c) === p.id);
+      const mineOwed = mine.filter((c) => c.status !== "paid");
+      const tenants = people.filter((x) => x.property === p.id && x.stage === "tenant");
+      return {
+        value: mineOwed.length ? money(sumBy(mineOwed, (c) => c.amount)) : "All in",
+        hint: mineOwed.length ? "still owed" : `${money(sumBy(mine, (c) => c.amount))} received`,
+        tone: mineOwed.length ? "out" : "",
+        detail: `${tenants.length} tenant${tenants.length === 1 ? "" : "s"} · ${money(sumBy(mine, (c) => c.amount))} due this month`,
+      };
+    }) +
+    (inMonth.some((c) => !houseOf(c))
+      ? `<p class="small muted" style="margin-top:1rem">
+          Some charges aren't tied to a house yet — give the person a property, or put them on a lease, and they'll appear above.
+        </p>`
+      : "")
   );
 }
 
@@ -467,13 +521,17 @@ async function screenProperty() {
   const owed = charges.filter((c) => c.status !== "paid");
   const kept = sumBy(income, (t) => t.amount) - sumBy(costs, (t) => t.amount);
 
+  const requests = (await api.list("maintenance_requests")).filter((r) => r.property === id);
+  const openJobs = requests.filter((r) => r.status === "new" || r.status === "in_progress");
+
   const byRoom = property.rental_type === "by_room" || rooms.length > 0;
   const TABS = [
     ["overview", "Overview"],
+    ["money", "Money"],
     ...(byRoom ? [["rooms", `Rooms (${rooms.length})`]] : []),
     ["rent", `Rent (${charges.length})`],
     ["people", `People (${residents.length})`],
-    ["costs", `Expenses (${costs.length})`],
+    ["repairs", `Repairs (${openJobs.length})`],
     ["papers", `Documents (${papers.length})`],
   ];
 
@@ -621,10 +679,133 @@ async function screenProperty() {
           .join("")}</ul></section>`;
   }
 
-  if (tab === "costs") {
+  if (tab === "money") {
+    // The same month-by-month view as the Money screen, for one house. Coming
+    // in from Money and getting a different shape of answer would make you
+    // re-learn the page you just left.
+    const ledger = monthlyLedger(
+      transactions.filter((t) => t.property === id),
+      charges,
+      12
+    );
+    const thisMonth = ledger[ledger.length - 1];
+    const finished = ledger.filter((r) => !r.current && (r.income > 0 || r.expenses > 0));
+    const average = finished.length ? sumBy(finished, (r) => r.net) / finished.length : 0;
+
+    body = `
+      <section class="card" style="margin-bottom:1.25rem">
+        <div class="card-body" style="display:flex;flex-wrap:wrap;gap:2rem;justify-content:space-between;align-items:flex-end">
+          <div>
+            <div class="hero-k">Kept here in ${esc(monthLabel(thisMonth.month))}</div>
+            <div class="hero-v ${thisMonth.net < 0 ? "bad" : ""}">${esc(money(thisMonth.net))}</div>
+            <div class="hero-sub">${esc(money(thisMonth.income))} in · ${esc(money(thisMonth.expenses))} out</div>
+          </div>
+          <dl style="display:flex;flex-wrap:wrap;gap:2rem">
+            <div>
+              <dt class="hero-k">Usual month</dt>
+              <dd style="margin:.2rem 0 0;font-size:1.25rem;font-weight:600">${esc(money(average))}</dd>
+              <dd class="small muted" style="margin:0">across ${finished.length} finished month${finished.length === 1 ? "" : "s"}</dd>
+            </div>
+            <div>
+              <dt class="hero-k">Kept all time</dt>
+              <dd style="margin:.2rem 0 0;font-size:1.25rem;font-weight:600">${esc(money(kept))}</dd>
+              <dd class="small muted" style="margin:0">this house alone</dd>
+            </div>
+          </dl>
+        </div>
+        <div style="border-top:1px solid var(--line-soft)">${renderMonths(ledger)}</div>
+      </section>`;
+  }
+
+  if (tab === "repairs") {
     body = `
       <section class="card card-body" style="margin-bottom:1.25rem">
-        <h2>Add an expense for this house</h2>
+        <h2>Report a job on this house</h2>
+        <form data-form="repair" data-property="${esc(id)}" style="margin-top:.85rem">
+          <div class="field" style="margin:0">
+            <label for="j-title">What needs doing?</label>
+            <input id="j-title" name="title" placeholder="Kitchen tap drips" required />
+          </div>
+          <div class="grid grid-sm-2" style="gap:.85rem;margin-top:.85rem">
+            <div class="field" style="margin:0">
+              <label for="j-priority">How urgent?</label>
+              <select id="j-priority" name="priority">
+                ${["low", "medium", "high", "urgent"]
+                  .map((p) => `<option value="${p}"${p === "medium" ? " selected" : ""}>${titleCase(p)}</option>`)
+                  .join("")}
+              </select>
+            </div>
+            <div class="field" style="margin:0">
+              <label for="j-person">Who reported it?</label>
+              <select id="j-person" name="person">
+                <option value="">You did</option>
+                ${residents
+                  .map((p) => `<option value="${esc(p.id)}">${esc(`${p.first_name ?? ""} ${p.last_name ?? ""}`.trim())}</option>`)
+                  .join("")}
+              </select>
+            </div>
+          </div>
+          ${rooms.length
+            ? `<div class="field" style="margin-top:.85rem">
+                <label for="j-unit">Which room?</label>
+                <select id="j-unit" name="unit">
+                  <option value="">The whole place</option>
+                  ${rooms.map((u) => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join("")}
+                </select>
+              </div>`
+            : ""}
+          <div class="field" style="margin-top:.85rem">
+            <label for="j-description">Anything else?</label>
+            <textarea id="j-description" name="description" rows="2"></textarea>
+          </div>
+          <div style="margin-top:.85rem;display:flex;gap:.6rem;align-items:center">
+            <button class="btn" type="submit">Add job</button>
+            <span class="small muted" data-role="status"></span>
+          </div>
+        </form>
+      </section>
+      ${requests.length === 0
+        ? `<div class="card empty">Nothing reported on this house. That's a good day.</div>`
+        : `<section class="card"><ul class="rows">${requests
+            .map((r) => {
+              const who = people.find((p) => p.id === r.person);
+              return `
+            <li>
+              <div style="min-width:0">
+                <div class="t">${esc(r.title)}</div>
+                <div class="s">
+                  ${esc(shortDate(r.created))}${who ? ` · reported by ${esc(`${who.first_name ?? ""} ${who.last_name ?? ""}`.trim())}` : ""}
+                  ${r.unit ? ` · ${esc(rooms.find((u) => u.id === r.unit)?.name || "")}` : ""}
+                </div>
+                ${r.description ? `<div class="s">${esc(r.description)}</div>` : ""}
+              </div>
+              <div style="display:flex;align-items:center;gap:.5rem">
+                <span class="tag ${r.priority === "urgent" || r.priority === "high" ? "bad" : ""}">${esc(titleCase(r.priority || "medium"))}</span>
+                <select data-action="repair-status" data-id="${esc(r.id)}" style="width:auto;font-size:.85rem">
+                  ${["new", "in_progress", "completed", "cancelled"]
+                    .map((s) => `<option value="${s}"${(r.status || "new") === s ? " selected" : ""}>${titleCase(s)}</option>`)
+                    .join("")}
+                </select>
+              </div>
+            </li>`;
+            })
+            .join("")}</ul></section>`}
+      <p class="small muted" style="margin-top:1rem">
+        Paperwork for this house lives under
+        <a href="#/property/${esc(id)}?tab=papers" style="color:var(--brand-600)">Documents</a>.
+      </p>`;
+  }
+
+  if (tab === "money") {
+    // Money in and money out on the same tab. A bill is for the whole house, so
+    // the form fills the property in for you — the only question left is what
+    // it was.
+    body += `
+      <section class="card card-body" style="margin-bottom:1.25rem">
+        <h2>Add a bill for this house</h2>
+        <p class="small muted" style="margin-top:.25rem">
+          Or bring a month of them in at once from <a href="#/bank" style="color:var(--brand-600)">Bank</a>.
+        </p>
         <form data-form="expense" data-property="${esc(id)}" style="margin-top:.85rem">
           <div class="grid grid-sm-2">
             <div class="field" style="margin:0">
@@ -805,26 +986,52 @@ async function screenTenants() {
     );
   }
 
+  const live = properties.filter((p) => !p.archived);
+  const units = await api.list("units");
+  const current = tenants.filter((p) => p.stage === "tenant");
+  const housed = current.filter((p) => p.property);
+  const unhoused = tenants.filter((p) => !p.property && p.stage !== "past");
+  const rooms = units.length;
+  const filled = units.filter((u) => u.status === "occupied").length;
+
   return (
-    head("Tenants", "Who lives where", `<a class="btn" href="#/tenant/new">+ Add person</a>`) +
-    hub([
-      { href: "#/rent", label: "Rent", detail: "What each tenant owes this month" },
-      { href: "#/repairs", label: "Repairs", detail: "What they've reported" },
-    ]) +
-    (tenants.length === 0
-      ? `<div class="card empty">No tenants yet.</div>`
-      : `<section class="card"><ul class="rows">${tenants
-          .map(
-            (p) => `
-          <li>
-            <a href="#/tenant/${esc(p.id)}" style="flex:1;min-width:0">
-              <div class="t">${esc(nameOf(p))} <span class="muted small">→</span></div>
-              <div class="s">${esc(p.email || "No email")}${p.property ? ` · ${esc(propertyName.get(p.property) || "")}` : ""}</div>
-            </a>
-            <span class="tag ${p.stage === "tenant" ? "good" : ""}">${esc(titleCase(p.stage === "past" ? "past tenant" : p.stage))}</span>
-          </li>`
-          )
-          .join("")}</ul></section>`) +
+    head("Tenants", "Where everyone is, house by house", `<a class="btn" href="#/tenant/new">+ Add person</a>`) +
+    `<div class="grid grid-2 grid-md-4" style="margin-bottom:1.25rem">
+      ${stat("Tenants", current.length, `${housed.length} in a house`)}
+      ${stat("Properties", live.length, `${live.filter((p) => p.status === "occupied").length} occupied`)}
+      ${stat("Rooms", rooms || "—", rooms ? `${filled} of ${rooms} filled` : "no by-the-room houses")}
+      ${stat("Applicants & leads", tenants.filter((p) => p.stage === "applicant" || p.stage === "lead").length)}
+    </div>` +
+    `<h2 style="margin:1.75rem 0 .85rem">House by house</h2>` +
+    houseRows(live, "people", (p) => {
+      const theirs = current.filter((x) => x.property === p.id);
+      const theirRooms = units.filter((u) => u.property === p.id);
+      return {
+        value: theirs.length || "Empty",
+        hint: theirs.length === 1 ? "tenant" : theirs.length ? "tenants" : "nobody in",
+        tone: theirs.length ? "" : "out",
+        detail: theirRooms.length
+          ? `${theirRooms.filter((u) => u.status === "occupied").length} of ${theirRooms.length} rooms filled`
+          : [p.address, p.city].filter(Boolean).join(", ") || "No address",
+      };
+    }) +
+    (unhoused.length > 0
+      ? `<section class="card" style="margin-top:1.5rem">
+          <div class="card-head"><h2>Not in a house yet</h2></div>
+          <ul class="rows">${unhoused
+            .map(
+              (p) => `
+            <li>
+              <a href="#/tenant/${esc(p.id)}" style="flex:1;min-width:0">
+                <div class="t">${esc(nameOf(p))} <span class="muted small">→</span></div>
+                <div class="s">${esc(p.email || "No email")}</div>
+              </a>
+              <span class="tag">${esc(titleCase(p.stage || "lead"))}</span>
+            </li>`
+            )
+            .join("")}</ul>
+        </section>`
+      : "") +
     (removed.length > 0
       ? `<p class="small" style="margin-top:1rem"><a href="#/tenants?removed=1" style="color:var(--brand-600)">Show removed (${removed.length})</a></p>`
       : "")
@@ -832,35 +1039,36 @@ async function screenTenants() {
 }
 
 async function screenRepairs() {
-  const [requests, properties] = await Promise.all([
+  const [requests, properties, documents] = await Promise.all([
     api.list("maintenance_requests"),
     api.list("properties"),
+    api.list("documents"),
   ]);
-  const propertyName = new Map(properties.map((p) => [p.id, p.name]));
-  const open = requests.filter((r) => r.status === "new" || r.status === "in_progress");
+  const live = properties.filter((p) => !p.archived);
+  const isOpen = (r) => r.status === "new" || r.status === "in_progress";
+  const open = requests.filter(isOpen);
+  const urgent = open.filter((r) => r.priority === "urgent" || r.priority === "high");
 
   return (
-    head("Repairs", "Requests from you or your tenants") +
-    (requests.length === 0
-      ? `<div class="card empty">Nothing reported. That's a good day.</div>`
-      : `<section class="card">
-          <div class="card-head"><h2>${open.length} open</h2></div>
-          <ul class="rows">${requests
-            .map(
-              (r) => `
-            <li>
-              <div>
-                <div class="t">${esc(r.title)}</div>
-                <div class="s">${esc(propertyName.get(r.property) || "")} · ${esc(shortDate(r.created))}</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:.5rem">
-                <span class="tag ${r.priority === "urgent" || r.priority === "high" ? "bad" : ""}">${esc(titleCase(r.priority || "medium"))}</span>
-                <span class="tag ${r.status === "completed" ? "good" : "warn"}">${esc(titleCase(r.status))}</span>
-              </div>
-            </li>`
-            )
-            .join("")}</ul>
-        </section>`)
+    head("Repairs & docs", "Jobs and paperwork, filed under the house they belong to") +
+    `<div class="grid grid-2 grid-md-4" style="margin-bottom:1.25rem">
+      ${stat("Open jobs", open.length, `${requests.length} reported all told`, open.length ? "bad" : "good")}
+      ${stat("Urgent", urgent.length, "high or urgent", urgent.length ? "bad" : "")}
+      ${stat("Done", requests.filter((r) => r.status === "completed").length, "closed off", "good")}
+      ${stat("Documents", documents.length, "leases, notices, receipts")}
+    </div>` +
+    `<h2 style="margin:1.75rem 0 .85rem">House by house</h2>` +
+    houseRows(live, "repairs", (p) => {
+      const theirs = requests.filter((r) => r.property === p.id);
+      const theirOpen = theirs.filter(isOpen);
+      const papers = documents.filter((d) => d.property === p.id);
+      return {
+        value: theirOpen.length || "Clear",
+        hint: theirOpen.length === 1 ? "job open" : theirOpen.length ? "jobs open" : "nothing outstanding",
+        tone: theirOpen.length ? "out" : "",
+        detail: `${papers.length} document${papers.length === 1 ? "" : "s"} · ${theirs.length} job${theirs.length === 1 ? "" : "s"} all told`,
+      };
+    })
   );
 }
 
@@ -961,6 +1169,9 @@ async function render() {
   else if (route.startsWith("/payment/")) screen = () => paymentForm(route.split("/")[2]);
   else if (route === "/lease/new") screen = () => leaseForm(null, routeParams().get("person") || "");
   else if (route.startsWith("/lease/")) screen = () => leaseForm(route.split("/")[2]);
+  else if (route === "/bank/new") screen = () => accountForm(null);
+  else if (/^\/bank\/[^/]+\/edit$/.test(route)) screen = () => accountForm(route.split("/")[2]);
+  else if (route.startsWith("/bank/")) screen = () => screenAccount(route.split("/")[2]);
   app.innerHTML = shell(`<div class="empty">Loading…</div>`);
   try {
     const html = await screen();
@@ -1164,10 +1375,50 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "cancel-import") {
     clearReview();
+    render();
+    return;
+  }
+  if (action === "delete-rule") {
+    const { id, name } = target.dataset;
+    if (!confirm(`Forget the rule for “${name}”?\n\nStatements will go back to being sorted by the built-in guesses. Anything already booked stays as it is.`)) {
+      return;
+    }
+    await api.remove("vendor_rules", id);
+    render();
+    return;
+  }
+  if (action === "delete-account") {
+    const { id, name } = target.dataset;
+    const rows = (await api.list("bank_imports")).filter((i) => i.account === id);
+
+    // The account is a folder. Emptying the folder must not empty the books —
+    // the expenses and payments booked from those statements stay.
+    if (!confirm(
+      `Remove ${name}?\n\n` +
+      (rows.length
+        ? `Its ${rows.length} imported row${rows.length === 1 ? "" : "s"} go with it, so a statement you have already brought in could be imported again. Everything already booked stays in your books.`
+        : `Nothing has been imported into it.`)
+    )) {
+      return;
+    }
+    for (const row of rows) await api.remove("bank_imports", row.id);
+    await api.remove("bank_accounts", id);
     location.hash = "#/bank";
     render();
     return;
   }
+});
+
+// A repair's status is a dropdown you change in the list, not a page you visit.
+document.addEventListener("change", async (event) => {
+  const select = event.target.closest('[data-action="repair-status"]');
+  if (!select) return;
+  select.disabled = true;
+  await api.update("maintenance_requests", select.dataset.id, {
+    status: select.value,
+    completed_at: select.value === "completed" ? new Date().toISOString().slice(0, 10) : "",
+  });
+  render();
 });
 
 // Conditional bits of a form react as soon as the answer changes, not on save.
@@ -1354,7 +1605,8 @@ document.addEventListener("submit", async (event) => {
       if (!text.trim()) throw new Error("Choose a file or paste the statement first.");
       await readStatement({
         text,
-        accountId: String(data.account || ""),
+        // Opening an account's folder decides which account it belongs to.
+        accountId: form.dataset.account || String(data.account || ""),
         propertyId: String(data.property || ""),
       });
       render();
@@ -1362,6 +1614,56 @@ document.addEventListener("submit", async (event) => {
       button.disabled = false;
       status.textContent = error.message;
     }
+    return;
+  }
+
+  if (form.dataset.form === "account") {
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-role="status"]');
+    button.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      const account = await saveAccount(form.dataset.id || null, data);
+      location.hash = `#/bank/${account.id}`;
+      render();
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = error.message;
+    }
+    return;
+  }
+
+  if (form.dataset.form === "rule") {
+    const status = form.querySelector('[data-role="status"]');
+    const match = String(data.match || "").trim().toLowerCase();
+    if (!match) return;
+    status.textContent = "Saving…";
+    const existing = (await api.list("vendor_rules")).find((r) => r.match === match);
+    const body = {
+      match,
+      category: String(data.category || "other"),
+      property: String(data.property || ""),
+      direction: data.category === "rent" ? "income" : "expense",
+    };
+    if (existing) await api.update("vendor_rules", existing.id, body);
+    else await api.create("vendor_rules", { ...body, uses: 0 });
+    render();
+    return;
+  }
+
+  if (form.dataset.form === "repair") {
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    await api.create("maintenance_requests", {
+      property: form.dataset.property,
+      unit: data.unit ?? "",
+      person: data.person ?? "",
+      title: data.title,
+      description: data.description ?? "",
+      priority: data.priority || "medium",
+      status: "new",
+    });
+    render();
     return;
   }
 

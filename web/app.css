@@ -299,15 +299,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand-500); outl
 .signin { display: grid; place-items: center; min-height: 100vh; padding: 1.5rem; }
 .signin .card { width: 100%; max-width: 24rem; }
 
-/* Hub links */
-.hub { display: grid; gap: 0.75rem; margin-bottom: 1.5rem; }
-.hub a { display: block; padding: 0.8rem 1rem; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
-.hub a:hover { border-color: var(--brand-300); }
-.hub .t { font-size: 0.9rem; font-weight: 500; }
-.hub .s { margin-top: 0.15rem; font-size: 0.76rem; color: var(--ink-500); }
-@media (min-width: 640px) { .hub { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 1280px) { .hub { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-
 /* Steps */
 .steps li { margin-top: 0.75rem; }
 .steps a { display: flex; gap: 0.75rem; align-items: flex-start; padding: 0.8rem 1rem; border: 1px solid var(--line); border-radius: var(--radius); }
@@ -370,6 +361,44 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand-500); outl
   background: var(--brand-100); color: var(--brand-700); font-weight: 500;
 }
 
+/* An account, as a folder you open */
+.folder {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  padding: 1rem 1.1rem;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.folder:hover { border-color: var(--brand-300); box-shadow: 0 2px 8px rgb(16 24 40 / 0.08); }
+.folder-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+.folder-mark {
+  display: flex; height: 2rem; width: 2rem;
+  align-items: center; justify-content: center;
+  border-radius: 0.6rem; background: var(--brand-50); color: var(--brand-600);
+}
+.folder-name { font-size: 1rem; font-weight: 600; }
+.folder-sub { font-size: 0.8rem; color: var(--ink-500); }
+.folder-foot { margin-top: 0.6rem; font-size: 0.76rem; color: var(--ink-500); }
+
+/* "When a statement says X, it is Y, for Z" — one sentence, one row */
+.rulerow { display: grid; gap: 0.6rem; align-items: end; }
+@media (min-width: 860px) {
+  .rulerow { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) auto; }
+}
+.rulerow button { justify-content: center; }
+
+/* "Always sort this vendor this way" */
+.learn {
+  grid-area: learn;
+  display: flex; gap: 0.45rem; align-items: center;
+  margin: 0; padding: 0;
+  font: inherit; font-size: 0.78rem; font-weight: 400;
+  text-transform: none; letter-spacing: normal; color: var(--ink-500);
+  cursor: pointer;
+}
+.learn input { width: auto; flex-shrink: 0; accent-color: var(--brand-600); }
+.learn strong { color: var(--ink-700); }
+
 /* Tick boxes, for the people on a lease */
 .checks { display: grid; gap: 0.4rem; }
 @media (min-width: 640px) { .checks { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -390,7 +419,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand-500); outl
 .imported {
   display: grid; gap: 0.5rem 0.9rem;
   grid-template-columns: auto 1fr auto;
-  grid-template-areas: "pick what amt" "sort sort sort";
+  grid-template-areas: "pick what amt" "sort sort sort" "learn learn learn";
   align-items: center;
   padding: 0.85rem 1.25rem;
   border-top: 1px solid var(--line-soft);
@@ -409,7 +438,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand-500); outl
 @media (min-width: 900px) {
   .imported {
     grid-template-columns: auto minmax(0, 1fr) 7rem minmax(0, 31rem);
-    grid-template-areas: "pick what amt sort";
+    grid-template-areas: "pick what amt sort" ". learn learn learn";
   }
   .imported .amt { text-align: right; }
   /* "Marcus Webb — $1,850.00 due Aug 1" needs more room than "Zelle" does.

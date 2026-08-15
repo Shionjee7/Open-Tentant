@@ -302,8 +302,11 @@ const CATEGORY_HINTS = [
   ["internet", /\b(internet|wi-?fi|comcast|xfinity|spectrum|at&?t|verizon|t-?mobile|cox comm|frontier|centurylink|google fiber|starlink|phone)\b/],
   ["insurance", /\b(insurance|insur|state farm|allstate|geico|progressive|liberty mutual|nationwide|travelers|erie ins)\b/],
   ["taxes", /\b(tax|treasurer|county of|irs|dept of revenue|auditor)\b/],
-  ["repairs", /\b(home depot|lowe'?s|menards|ace hardware|plumb|hvac|roof|electrician|handyman|repair|contractor|sherwin|grainger|appliance)\b/],
-  ["turnover", /\b(clean|carpet|paint|junk removal|dumpster|locksmith|turnover|landscap|lawn|snow)\b/],
+  // Stems carry a \w* because a trailing \b will not let one through: "plumb"
+  // does not match "PLUMBING", so a plumber's invoice was landing in "Something
+  // else" every month.
+  ["repairs", /\b(home depot|lowe'?s|menards|ace hardware|plumb\w*|hvac|roof\w*|electrician|handyman|repair\w*|contractor\w*|sherwin|grainger|appliance\w*|heating|cooling)\b/],
+  ["turnover", /\b(clean\w*|carpet|paint\w*|junk removal|dumpster|locksmith|turnover|landscap\w*|lawn|mow\w*|snow)\b/],
   ["hoa", /\b(hoa|homeowners assoc|condo assoc|association dues|management fee)\b/],
 ];
 
@@ -313,6 +316,49 @@ export function suggestCategory(description) {
     if (pattern.test(text)) return category;
   }
   return "other";
+}
+
+/**
+ * The vendor's name, pulled out of a statement line.
+ *
+ * Statements bolt a reference onto the end — "DUKE ENERGY OH PAYMENT 8829119",
+ * "ROCKET MORTGAGE PMT 03/04" — and the reference changes every month while the
+ * name never does. So a remembered rule is built from the words at the front,
+ * with the digits and the bank's own boilerplate stripped off. Get it wrong and
+ * you can edit the rule; the point is that the suggestion is usually right.
+ */
+const BOILERPLATE = /\b(payment|pmt|ach|debit|credit|purchase|pos|recurring|autopay|auto pay|online|web|bill ?pay|withdrawal|deposit|transfer|xfer|des|id|indn|ppd|ccd|co|ref)\b/g;
+
+export function vendorKey(description) {
+  const cleaned = String(description)
+    .toLowerCase()
+    .split(/ — /)[0]
+    .replace(/[#*]/g, " ")
+    .replace(/\b[\d/.-]{2,}\b/g, " ")
+    .replace(BOILERPLATE, " ")
+    .replace(/[^a-z& ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const words = cleaned.split(" ").filter((w) => w.length > 1);
+  // Two words name a vendor without pinning it to one month's reference:
+  // "duke energy", "rocket mortgage", "city columbus".
+  return words.slice(0, 2).join(" ");
+}
+
+/**
+ * Applies the landlord's own rules first.
+ *
+ * A rule the landlord wrote beats a pattern we shipped, always. They know their
+ * plumber's trading name and we do not.
+ */
+export function applyRules(description, rules) {
+  const text = String(description).toLowerCase();
+  const hits = rules
+    .filter((rule) => rule.match && text.includes(String(rule.match).toLowerCase()))
+    // The most specific rule wins, so "duke energy solar" beats "duke".
+    .sort((a, b) => String(b.match).length - String(a.match).length);
+  return hits[0] ?? null;
 }
 
 /**

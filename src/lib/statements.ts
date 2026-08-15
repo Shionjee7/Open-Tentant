@@ -296,8 +296,10 @@ const CATEGORY_HINTS: [string, RegExp][] = [
   ["mortgage", /\b(mortgage|loan pmt|loan payment|escrow|rocket mortgage|freedom mtg|mr cooper|wells fargo home)\b/],
   ["insurance", /\b(insurance|insur|state farm|allstate|geico|progressive|liberty mutual|nationwide)\b/],
   ["taxes", /\b(tax|treasurer|county of|irs|dept of revenue)\b/],
-  ["repairs", /\b(home depot|lowe'?s|menards|ace hardware|plumb|hvac|roof|electric(ian)?|handyman|repair|contractor|sherwin|grainger)\b/],
-  ["turnover", /\b(clean|carpet|paint|junk removal|dumpster|locksmith|turnover)\b/],
+  // Stems carry a \w* because a trailing \b will not let one through: "plumb"
+  // does not match "PLUMBING".
+  ["repairs", /\b(home depot|lowe'?s|menards|ace hardware|plumb\w*|hvac|roof\w*|electric(ian)?|handyman|repair\w*|contractor\w*|sherwin|grainger)\b/],
+  ["turnover", /\b(clean\w*|carpet|paint\w*|junk removal|dumpster|locksmith|turnover)\b/],
   ["software", /\b(software|subscription|saas|google|microsoft|adobe|zoom|godaddy|namecheap)\b/],
 ];
 
