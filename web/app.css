@@ -218,31 +218,41 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
    do have content off the bottom of the screen. */
 .card-head + .empty { padding: 1.5rem 1.25rem; }
 
-/* Month rows */
-.months li {
+/* The months, as a table of what actually happened */
+.ledger { display: flex; flex-direction: column; }
+.ledger-head, .ledger-row {
   display: grid;
-  grid-template-columns: 3.75rem 1fr auto;
-  align-items: center; gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  align-items: baseline;
   padding: 0.6rem 1rem;
-  border-top: 1px solid var(--line-soft);
 }
-.months li:first-child { border-top: 0; }
-.months li.now { background: var(--brand-50); }
-.months .m { font-size: 0.9rem; }
-.months .m .sofar { display: block; font-size: 0.62rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-500); }
-.months .track { display: flex; align-items: center; height: 1.5rem; }
-.months .track .side { flex: 1; display: flex; height: 100%; align-items: center; }
-.months .track .side.left { justify-content: flex-end; }
-.months .zero { width: 1px; height: 1rem; background: #cbd5e1; flex-shrink: 0; }
-.months .bar { height: 0.85rem; }
-.months .bar.in { background: var(--in); border-radius: 0 3px 3px 0; }
-.months .bar.out { background: var(--out); border-radius: 3px 0 0 3px; }
-.months .amt { font-size: 0.9rem; font-weight: 600; }
-.months .amt.bad { color: var(--out); }
-.months .flow { font-size: 0.7rem; color: var(--ink-500); }
+.ledger-head {
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 0.68rem; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-500);
+}
+.ledger-head span:not(:first-child), .ledger-row span:not(:first-child) { text-align: right; }
+.ledger-row { border-top: 1px solid var(--line-soft); font-size: 0.9rem; }
+.ledger-row:first-of-type { border-top: 0; }
+.ledger-row.now { background: var(--brand-50); }
+.ledger-row .m { font-weight: 500; }
+.ledger-row .sofar {
+  font-size: 0.62rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-500);
+}
+.ledger-row .in { color: var(--ink-700); }
+.ledger-row .out { color: var(--ink-500); }
+.ledger-row .net { font-weight: 600; }
+.ledger-row .net.bad { color: var(--out); }
 @media (min-width: 640px) {
-  .months li { grid-template-columns: 5rem 1fr 9.5rem; gap: 1rem; padding: 0.6rem 1.25rem; }
+  .ledger-head, .ledger-row { padding: 0.6rem 1.25rem; }
 }
+
+/* How much of this month's rent is actually in */
+.meter {
+  height: 0.6rem; border-radius: 999px; background: #e8edf5; overflow: hidden;
+}
+.meter span { display: block; height: 100%; background: var(--in); border-radius: 999px; }
 
 /* Simple list rows */
 .rows li {
@@ -363,6 +373,40 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand-500); outl
   margin-top: 0.4rem; padding: 0.2rem 0.55rem; border-radius: 999px;
   background: var(--brand-100); color: var(--brand-700); font-weight: 500;
 }
+
+/* Asking, in the app's own voice */
+.ask {
+  width: min(30rem, calc(100vw - 2rem));
+  padding: 0; margin: auto;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--card); color: var(--ink-900);
+  box-shadow: 0 12px 32px rgb(16 24 40 / 0.18);
+}
+.ask::backdrop { background: rgb(2 6 23 / 0.45); }
+.ask-body { padding: 1.35rem; }
+.ask h2 { font-size: 1.15rem; }
+.ask-msg { margin-top: 0.5rem; font-size: 0.9rem; color: var(--ink-700); line-height: 1.55; }
+.ask-note { margin-top: 0.85rem; }
+
+/* What is standing in the way, and where to go and deal with it. */
+.ask-points {
+  margin-top: 0.9rem;
+  border: 1px solid var(--line); border-radius: 0.6rem;
+  overflow: hidden;
+}
+.ask-points li {
+  display: flex; flex-wrap: wrap; gap: 0.5rem;
+  align-items: center; justify-content: space-between;
+  padding: 0.6rem 0.8rem; border-top: 1px solid var(--line-soft);
+  font-size: 0.88rem;
+}
+.ask-points li:first-child { border-top: 0; }
+.ask-go { color: var(--brand-600); font-size: 0.82rem; font-weight: 500; white-space: nowrap; }
+.ask-go:hover { color: var(--brand-700); text-decoration: underline; }
+
+.ask-acts { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: flex-end; margin-top: 1.25rem; }
+.btn.danger { background: var(--out); border-color: var(--out); }
+.btn.danger:hover { background: #a8341f; border-color: #a8341f; }
 
 /* An account, as a folder you open */
 .folder {

@@ -27,6 +27,7 @@ import {
   tenantForm,
 } from "./forms.js";
 import { screenPerson } from "./person.js";
+import { ask, tell } from "./modal.js";
 import {
   accountForm,
   bookStatement,
@@ -41,7 +42,7 @@ import { VERSION } from "./version.js";
 
 const NAV = [
   { href: "#/", label: "Home", icon: "▦", hint: "This month at a glance" },
-  { href: "#/money", label: "Money", icon: "$", hint: "What each house makes" },
+  { href: "#/money", label: "Money by house", icon: "$", hint: "What each one makes" },
   { href: "#/rent", label: "Rent", icon: "◷", hint: "Who has paid, house by house" },
   { href: "#/bank", label: "Bank", icon: "▤", hint: "Your accounts and their statements" },
   { href: "#/properties", label: "Properties", icon: "⌂", hint: "Your places and rooms" },
@@ -170,11 +171,12 @@ async function loadMoney() {
 }
 
 async function screenHome() {
-  const [{ rows }, properties, people, maintenance] = await Promise.all([
+  const [{ rows, transactions, payments }, properties, people, maintenance, units] = await Promise.all([
     loadMoney(),
     api.list("properties"),
     api.list("people"),
     api.list("maintenance_requests"),
+    api.list("units"),
   ]);
 
   if (properties.length === 0) {
@@ -193,32 +195,115 @@ async function screenHome() {
   }
 
   const thisMonth = rows[rows.length - 1];
-  const booked = rows.some((r) => r.income > 0 || r.expenses > 0);
   const tenants = people.filter((p) => p.stage === "tenant");
   const open = maintenance.filter((m) => m.status === "new" || m.status === "in_progress");
-  const occupied = properties.filter((p) => p.status === "occupied").length;
+  const urgent = open.filter((m) => m.priority === "urgent" || m.priority === "high");
+  const live = properties.filter((p) => !p.archived);
+  const occupied = live.filter((p) => p.status === "occupied").length;
+  const empty = units.filter((u) => u.status !== "occupied");
+
+  const today = new Date().toISOString().slice(0, 10);
+  const overdue = payments.filter((c) => c.status !== "paid" && String(c.due_date ?? "") < today);
+  const collected = thisMonth.rentDue > 0 ? Math.round((thisMonth.rentPaid / thisMonth.rentDue) * 100) : 0;
+  const kept = sumBy(transactions.filter((t) => t.type === "income"), (t) => t.amount)
+    - sumBy(transactions.filter((t) => t.type === "expense"), (t) => t.amount);
+
+  // What actually wants doing, in the order it wants doing it. An empty list is
+  // the point — a dashboard that always has something red on it stops meaning
+  // anything.
+  const jobs = [];
+  if (overdue.length) {
+    jobs.push({
+      href: "#/rent",
+      label: `${overdue.length} charge${overdue.length === 1 ? "" : "s"} past their due date`,
+      detail: `${money(sumBy(overdue, (c) => c.amount))} outstanding`,
+      tone: "bad",
+    });
+  }
+  if (urgent.length) {
+    jobs.push({
+      href: "#/repairs",
+      label: `${urgent.length} urgent repair${urgent.length === 1 ? "" : "s"}`,
+      detail: urgent.map((r) => r.title).slice(0, 2).join(", "),
+      tone: "bad",
+    });
+  }
+  if (empty.length) {
+    jobs.push({
+      href: "#/properties",
+      label: `${empty.length} room${empty.length === 1 ? "" : "s"} sitting empty`,
+      detail: `${money(sumBy(empty, (u) => u.rent))} a month not being earned`,
+      tone: "warn",
+    });
+  }
+  if (open.length - urgent.length > 0) {
+    jobs.push({
+      href: "#/repairs",
+      label: `${open.length - urgent.length} other repair${open.length - urgent.length === 1 ? "" : "s"} open`,
+      detail: "nothing urgent",
+      tone: "",
+    });
+  }
 
   return (
-    head("Home", "This month at a glance") +
-    (booked
-      ? `<section class="card" style="margin-bottom:1.25rem">
-          <div class="card-body" style="display:flex;flex-wrap:wrap;gap:1rem;justify-content:space-between;align-items:flex-end">
-            <div>
-              <div class="hero-k">Kept in ${esc(monthLabel(thisMonth.month))} so far</div>
-              <div class="hero-v ${thisMonth.net < 0 ? "bad" : ""}">${esc(money(thisMonth.net))}</div>
-              <div class="hero-sub">${esc(money(thisMonth.income))} in · ${esc(money(thisMonth.expenses))} out</div>
-            </div>
-            <a class="btn-secondary" href="#/money">See every month →</a>
+    head("Home", "Everything together, as it stands today") +
+
+    `<section class="card" style="margin-bottom:1.25rem">
+      <div class="card-body" style="display:flex;flex-wrap:wrap;gap:2rem;justify-content:space-between;align-items:flex-end">
+        <div>
+          <div class="hero-k">Kept in ${esc(monthLabel(thisMonth.month))} so far</div>
+          <div class="hero-v ${thisMonth.net < 0 ? "bad" : ""}">${esc(money(thisMonth.net))}</div>
+          <div class="hero-sub">${esc(money(thisMonth.income))} came in · ${esc(money(thisMonth.expenses))} went out</div>
+        </div>
+        <div style="min-width:15rem;flex:1;max-width:26rem">
+          <div class="hero-k">Rent for ${esc(monthLabel(thisMonth.month))}</div>
+          <div style="margin:.4rem 0 .5rem;font-size:1.05rem">
+            <strong>${esc(money(thisMonth.rentPaid))}</strong>
+            <span class="muted">of ${esc(money(thisMonth.rentDue))} in</span>
           </div>
-          <div style="border-top:1px solid var(--line-soft)">${renderMonths(rows.slice(-6))}</div>
-        </section>`
-      : "") +
-    `<div class="grid grid-2 grid-md-4">
-      ${stat("Properties", properties.length, `${occupied} rented`)}
-      ${stat("Tenants", tenants.length)}
-      ${stat("Open repairs", open.length, "new + in progress", open.length ? "bad" : "")}
-      ${stat("Rent this month", money(thisMonth.rentDue), `${money(thisMonth.rentPaid)} received`, "good")}
-    </div>`
+          <div class="meter" role="img" aria-label="${collected}% of this month's rent received">
+            <span style="width:${collected}%"></span>
+          </div>
+          <div class="small muted" style="margin-top:.35rem">
+            ${thisMonth.rentDue > 0
+              ? `${collected}% collected · ${esc(money(thisMonth.rentDue - thisMonth.rentPaid))} still to come`
+              : "Nothing scheduled this month."}
+          </div>
+        </div>
+      </div>
+    </section>` +
+
+    `<section class="card" style="margin-bottom:1.25rem">
+      <div class="card-head"><h2>${jobs.length ? "Wants you today" : "Nothing wants you today"}</h2></div>
+      ${jobs.length === 0
+        ? `<div class="empty">Rent is in, nothing is broken, and every room is filled.</div>`
+        : `<ul class="rows">${jobs
+            .map(
+              (job) => `
+          <li>
+            <a href="${job.href}" style="flex:1;min-width:0">
+              <div class="t" ${job.tone === "bad" ? 'style="color:var(--out)"' : ""}>${esc(job.label)} <span class="muted small">→</span></div>
+              <div class="s">${esc(job.detail)}</div>
+            </a>
+          </li>`
+            )
+            .join("")}</ul>`}
+    </section>` +
+
+    `<div class="grid grid-2 grid-md-4" style="margin-bottom:1.25rem">
+      ${stat("Properties", live.length, `${occupied} occupied`)}
+      ${stat("Tenants", tenants.length, units.length ? `${units.length - empty.length} of ${units.length} rooms filled` : "")}
+      ${stat("Open repairs", open.length, urgent.length ? `${urgent.length} urgent` : "nothing urgent", open.length ? "bad" : "good")}
+      ${stat("Kept all time", money(kept), "income minus every expense", kept >= 0 ? "good" : "bad")}
+    </div>` +
+
+    `<section class="card">
+      <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;gap:.75rem">
+        <h2>The last few months</h2>
+        <a class="small" href="#/money" style="color:var(--brand-600)">Money by house →</a>
+      </div>
+      ${renderMonths(rows.slice(-6))}
+    </section>`
   );
 }
 
@@ -270,7 +355,7 @@ async function screenMoney() {
 
   if (!started) {
     return (
-      head("Money", "What each house makes, and what the lot of them make together.") +
+      head("Money by house", "What each one makes, once there is something to count.") +
       `<div class="card card-body">
         <h2>Nothing to count yet</h2>
         <p class="sub muted" style="margin-top:.35rem">Mark some rent as paid, and the months fill in.</p>
@@ -286,7 +371,6 @@ async function screenMoney() {
   const thisMonth = rows[rows.length - 1];
   const finished = rows.filter((r) => !r.current && (r.income > 0 || r.expenses > 0));
   const average = finished.length ? sumBy(finished, (r) => r.net) / finished.length : 0;
-  const best = finished.reduce((top, r) => (!top || r.net > top.net ? r : top), null);
   const kept = sumBy(transactions.filter((t) => t.type === "income"), (t) => t.amount)
     - sumBy(transactions.filter((t) => t.type === "expense"), (t) => t.amount);
 
@@ -295,37 +379,13 @@ async function screenMoney() {
   const unassigned = transactions.filter((t) => !t.property);
 
   return (
-    head("Money", "The whole portfolio first, then each house.") +
-    `<section class="card">
-      <div class="card-body" style="display:flex;flex-wrap:wrap;gap:2rem;justify-content:space-between;align-items:flex-end">
-        <div>
-          <div class="hero-k">Kept in ${esc(monthLabel(thisMonth.month))} so far</div>
-          <div class="hero-v ${thisMonth.net < 0 ? "bad" : ""}">${esc(money(thisMonth.net))}</div>
-          <div class="hero-sub">${esc(money(thisMonth.income))} in · ${esc(money(thisMonth.expenses))} out · everything together</div>
-        </div>
-        <dl style="display:flex;flex-wrap:wrap;gap:2rem">
-          <div>
-            <dt class="hero-k">Usual month</dt>
-            <dd style="margin:.2rem 0 0;font-size:1.25rem;font-weight:600">${esc(money(average))}</dd>
-            <dd class="small muted" style="margin:0">across ${finished.length} finished month${finished.length === 1 ? "" : "s"}</dd>
-          </div>
-          ${best
-            ? `<div>
-                <dt class="hero-k">Best month</dt>
-                <dd style="margin:.2rem 0 0;font-size:1.25rem;font-weight:600">${esc(money(best.net))}</dd>
-                <dd class="small muted" style="margin:0">${esc(monthLabel(best.month))}</dd>
-              </div>`
-            : ""}
-          <div>
-            <dt class="hero-k">Kept all time</dt>
-            <dd style="margin:.2rem 0 0;font-size:1.25rem;font-weight:600">${esc(money(kept))}</dd>
-            <dd class="small muted" style="margin:0">income minus every expense</dd>
-          </div>
-        </dl>
-      </div>
-      <div style="border-top:1px solid var(--line-soft)">${renderMonths(rows)}</div>
-    </section>` +
-    `<h2 style="margin:1.75rem 0 .85rem">House by house</h2>` +
+    head("Money by house", "What each one makes. Open a house to see its months.") +
+    `<div class="grid grid-2 grid-md-4" style="margin-bottom:1.5rem">
+      ${stat(`Kept in ${monthLabel(thisMonth.month)}`, money(thisMonth.net), "everything together, so far", thisMonth.net < 0 ? "bad" : "good")}
+      ${stat("Usual month", money(average), `across ${finished.length} finished month${finished.length === 1 ? "" : "s"}`)}
+      ${stat("Kept all time", money(kept), "income minus every expense")}
+      ${stat("Houses", live.length, `${live.filter((p) => p.status === "occupied").length} occupied`)}
+    </div>` +
     houseRows(live, "money", (p) => {
       const mine = transactions.filter((t) => t.property === p.id);
       const income = sumBy(mine.filter((t) => t.type === "income"), (t) => t.amount);
@@ -342,7 +402,7 @@ async function screenMoney() {
       ? `<p class="small muted" style="margin-top:1rem">
           ${unassigned.length} entr${unassigned.length === 1 ? "y is" : "ies are"} not filed against a house,
           worth ${esc(money(sumBy(unassigned.filter((t) => t.type === "income"), (t) => t.amount) - sumBy(unassigned.filter((t) => t.type === "expense"), (t) => t.amount)))}.
-          They count in the portfolio total above but appear under no house.
+          They count in the totals above but appear under no house.
         </p>`
       : "")
   );
@@ -560,13 +620,13 @@ async function screenProperty() {
         </div>
         <div style="margin-top:1.25rem;border-top:1px solid var(--line-soft);padding-top:1rem">
           <button class="btn-secondary" data-action="delete-property"
-            data-id="${esc(property.id)}" data-name="${esc(property.name)}"
-            data-people="${residents.length}" data-leases="${ourLeases.filter((l) => l.status === "active" || l.status === "sent" || l.status === "signed").length}">
+            data-id="${esc(property.id)}" data-name="${esc(property.name)}">
             Remove this property
           </button>
           <p class="small muted" style="margin-top:.5rem">
-            Asks first, and is refused while anyone still lives here. Removing takes it off
-            your list and keeps its history — you can put it back later.
+            It asks first, and shows you anything still attached — people, leases,
+            repairs, paperwork — with a way to each. Removing takes it off your list
+            and keeps its history, and you can put it back later.
           </p>
         </div>
       </section>`;
@@ -619,6 +679,7 @@ async function screenProperty() {
                   <button class="btn-secondary" type="submit">Save</button>
                   <button type="button" class="btn-secondary" data-action="delete-room"
                     data-id="${esc(room.id)}" data-name="${esc(room.name)}" data-who="${esc(name)}"
+                    data-person="${esc(who?.id ?? "")}"
                     style="color:var(--out);border-color:#f3c7c0">Remove</button>
                 </div>
               </form>`;
@@ -658,7 +719,48 @@ async function screenProperty() {
   }
 
   if (tab === "people") {
-    body = residents.length === 0
+    // People and the agreements they are here under, on one tab. Removing a
+    // property sends you here when a lease is in the way, so the lease has to
+    // be something you can actually act on when you arrive.
+    const leaseList = `
+      <section class="card" style="margin-top:1.25rem">
+        <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;gap:.75rem">
+          <h2>Leases</h2>
+          <a class="small" href="#/lease/new" style="color:var(--brand-600)">+ Start a lease</a>
+        </div>
+        ${ourLeases.length === 0
+          ? `<div class="empty">No leases on this house.</div>`
+          : `<ul class="rows">${ourLeases
+              .map((l) => {
+                const who = (l.tenants ?? []).map((t) => nameOf.get(t)).filter(Boolean);
+                const live = l.status === "active" || l.status === "signed" || l.status === "sent";
+                const charges = payments.filter((p) => p.lease === l.id).length;
+                return `
+            <li>
+              <div style="min-width:0">
+                <div class="t">${esc(who.join(", ") || "Nobody on it")}</div>
+                <div class="s">
+                  ${esc(moneyExact(l.rent))}/mo · ${esc(shortDate(l.start_date))} to ${esc(shortDate(l.end_date))}
+                  ${charges ? ` · ${charges} charge${charges === 1 ? "" : "s"} made under it` : ""}
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+                <span class="tag ${l.status === "active" ? "good" : ""}">${esc(titleCase(l.status || "draft"))}</span>
+                <a class="btn-secondary" href="#/lease/${esc(l.id)}">Edit</a>
+                ${live
+                  ? `<button class="btn-secondary" data-action="end-lease" data-id="${esc(l.id)}"
+                       data-name="${esc(who.join(", ") || "this lease")}">End it</button>`
+                  : ""}
+                <button class="btn-secondary" data-action="delete-lease" data-id="${esc(l.id)}"
+                  data-name="${esc(who.join(", ") || "this lease")}" data-charges="${charges}"
+                  style="color:var(--out);border-color:#f3c7c0">Delete</button>
+              </div>
+            </li>`;
+              })
+              .join("")}</ul>`}
+      </section>`;
+
+    body = (residents.length === 0
       ? `<div class="card empty">Nobody is living here yet.</div>`
       : `<section class="card"><ul class="rows">${residents
           .map((p) => {
@@ -678,7 +780,7 @@ async function screenProperty() {
               </div>
             </li>`;
           })
-          .join("")}</ul></section>`;
+          .join("")}</ul></section>`) + leaseList;
   }
 
   if (tab === "money") {
@@ -1263,31 +1365,113 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "delete-property") {
     const { id, name } = target.dataset;
-    const people = Number(target.dataset.people) || 0;
-    const leases = Number(target.dataset.leases) || 0;
 
-    // Refuse while the house is in use — deleting it would strand the people
-    // and the lease that point at it.
-    if (people > 0) {
-      alert(`${name} still has ${people} ${people === 1 ? "person" : "people"} living there.\n\nMove them out first, then you can remove the property.`);
-      return;
+    // Everything still hanging off this house, counted fresh rather than read
+    // off the button — and each one a door you can walk through, because
+    // "you can't yet" without saying where to go is just a locked door.
+    const [people, leases, documents, requests] = await Promise.all([
+      api.list("people"),
+      api.list("leases"),
+      api.list("documents"),
+      api.list("maintenance_requests"),
+    ]);
+    const living = people.filter((p) => p.property === id && p.stage !== "past");
+    const active = leases.filter(
+      (l) => l.property === id && (l.status === "active" || l.status === "signed" || l.status === "sent")
+    );
+    const papers = documents.filter((d) => d.property === id);
+    const openJobs = requests.filter((r) => r.property === id && (r.status === "new" || r.status === "in_progress"));
+
+    const points = [];
+    if (living.length) {
+      points.push({
+        label: `${living.length} ${living.length === 1 ? "person" : "people"} living there`,
+        href: `#/property/${id}?tab=people`,
+        action: "See them",
+      });
     }
-    if (leases > 0) {
-      alert(`${name} still has ${leases} active lease${leases === 1 ? "" : "s"}.\n\nEnd the lease first, then you can remove the property.`);
-      return;
+    if (active.length) {
+      points.push({
+        label: `${active.length} lease${active.length === 1 ? "" : "s"} still running`,
+        href: `#/property/${id}?tab=people`,
+        action: active.length === 1 ? "See the lease" : "See the leases",
+      });
+    }
+    if (openJobs.length) {
+      points.push({
+        label: `${openJobs.length} repair${openJobs.length === 1 ? "" : "s"} still open`,
+        href: `#/property/${id}?tab=repairs`,
+        action: "See them",
+      });
+    }
+    if (papers.length) {
+      points.push({
+        label: `${papers.length} document${papers.length === 1 ? "" : "s"} filed against it`,
+        href: `#/property/${id}?tab=papers`,
+        action: "See them",
+      });
     }
 
-    // Name the property in the question, so a mis-click on the wrong row is
-    // obvious before anything happens.
-    if (!confirm(`Remove ${name}?\n\nIt comes off your list. Its rent history, expenses and documents stay in your books, and you can put it back from "Show removed".`)) {
+    const { ok, go } = await ask({
+      title: `Remove ${name}?`,
+      message:
+        `It comes off your list. Its rent history, expenses and documents stay in your books, ` +
+        `and you can put it back from “Show removed”.`,
+      points,
+      note: living.length || active.length
+        ? "Somebody is still living here or a lease is still running. You can remove it anyway — nothing is destroyed — or go and deal with those first."
+        : "",
+      confirmLabel: "Remove it",
+      cancelLabel: "Keep it",
+      danger: true,
+    });
+
+    if (go) {
+      location.hash = go;
+      render();
       return;
     }
+    if (!ok) return;
 
     // Archived, not deleted. Leases and repairs hold a required reference to
     // the property, so destroying it would either fail outright or take the
     // history with it — and a landlord needs last year's numbers.
     await api.update("properties", id, { archived: true });
     location.hash = "#/properties";
+    render();
+    return;
+  }
+  if (action === "end-lease") {
+    const { id, name } = target.dataset;
+    const { ok } = await ask({
+      title: `End the lease for ${name}?`,
+      message:
+        "It stays in your records as an ended lease, and every charge made under it stays in your books. " +
+        "This is what you want when somebody moves out.",
+      confirmLabel: "End it",
+      cancelLabel: "Leave it running",
+    });
+    if (!ok) return;
+    await api.update("leases", id, { status: "ended" });
+    render();
+    return;
+  }
+  if (action === "delete-lease") {
+    const { id, name } = target.dataset;
+    const charges = Number(target.dataset.charges) || 0;
+    const { ok } = await ask({
+      title: `Delete the lease for ${name}?`,
+      message: charges
+        ? `The lease goes for good. The ${charges} charge${charges === 1 ? "" : "s"} made under it stay in your books — ` +
+          `they just stop pointing at a lease.`
+        : "The lease goes for good. Nothing has been charged under it.",
+      note: "If they have simply moved out, End it keeps the record of what was agreed.",
+      confirmLabel: "Delete it",
+      cancelLabel: "Cancel",
+      danger: true,
+    });
+    if (!ok) return;
+    await api.remove("leases", id);
     render();
     return;
   }
@@ -1305,13 +1489,44 @@ document.addEventListener("click", async (event) => {
     // is attached: they really do disappear, and the question says so. Something
     // is attached: they come off the list and the money stays, and the question
     // says that instead. Neither one lies about what the button does.
-    const question =
-      ties.total === 0
-        ? `Delete ${name}?\n\nThey have no rent, leases or repairs on file, so this removes them completely. It cannot be undone.`
-        : `Remove ${name}?\n\nThey come off your tenant list. Their rent history stays in your books` +
-          `${ties.leases ? ", and so do their leases" : ""}, and you can put them back from "Show removed".`;
+    const points = [];
+    if (ties.payments) {
+      points.push({ label: `${ties.payments} charge${ties.payments === 1 ? "" : "s"} in your books`, href: `#/tenant/${id}`, action: "See them" });
+    }
+    if (ties.leases) {
+      points.push({ label: `on ${ties.leases} lease${ties.leases === 1 ? "" : "s"}`, href: `#/tenant/${id}`, action: "See them" });
+    }
+    if (ties.requests) {
+      points.push({ label: `${ties.requests} repair${ties.requests === 1 ? "" : "s"} they reported`, href: "#/repairs", action: "See them" });
+    }
 
-    if (!confirm(question)) {
+    const { ok, go } = await ask(
+      ties.total === 0
+        ? {
+            title: `Delete ${name}?`,
+            message:
+              "They have no rent, leases or repairs on file, so this removes them completely. It cannot be undone.",
+            confirmLabel: "Delete them",
+            cancelLabel: "Keep them",
+            danger: true,
+          }
+        : {
+            title: `Remove ${name}?`,
+            message:
+              "They come off your tenant list. Their rent history stays in your books, and you can put them back from “Show removed”.",
+            points,
+            confirmLabel: "Remove them",
+            cancelLabel: "Keep them",
+            danger: true,
+          }
+    );
+
+    if (go) {
+      location.hash = go;
+      render();
+      return;
+    }
+    if (!ok) {
       target.disabled = false;
       return;
     }
@@ -1324,12 +1539,23 @@ document.addEventListener("click", async (event) => {
   if (action === "delete-room") {
     const { id, name, who } = target.dataset;
     if (who) {
-      alert(`${who} is living in ${name}.\n\nMove them to another room, or off the property, before removing it.`);
+      const { go } = await tell({
+        title: `${who} is living in ${name}`,
+        message: "Move them to another room, or off the property, and then the room can go.",
+        points: [{ label: `${who}`, href: `#/tenant/${target.dataset.person || ""}`, action: "Open them" }],
+        closeLabel: "Leave the room alone",
+      });
+      if (go) { location.hash = go; render(); }
       return;
     }
-    if (!confirm(`Remove ${name}?\n\nThe room goes for good. Rent already charged against it stays in your books.`)) {
-      return;
-    }
+    const room = await ask({
+      title: `Remove ${name}?`,
+      message: "The room goes for good. Rent already charged against it stays in your books.",
+      confirmLabel: "Remove it",
+      cancelLabel: "Keep it",
+      danger: true,
+    });
+    if (!room.ok) return;
     await api.remove("units", id);
     render();
     return;
@@ -1341,16 +1567,29 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "delete-document") {
     const { id, name } = target.dataset;
-    if (!confirm(`Delete "${name}"?\n\nThe file goes with it, and this cannot be undone.`)) return;
+    const paper = await ask({
+      title: `Delete “${name}”?`,
+      message: "The file goes with it, and this cannot be undone.",
+      confirmLabel: "Delete it",
+      cancelLabel: "Keep it",
+      danger: true,
+    });
+    if (!paper.ok) return;
     await api.remove("documents", id);
     render();
     return;
   }
   if (action === "delete-payment") {
     const { id, name, amount } = target.dataset;
-    if (!confirm(`Delete this ${amount} charge for ${name}?\n\nIt disappears from your books, along with any income it recorded. This cannot be undone.\n\nIf they simply never paid, mark it unpaid instead — that keeps the record that it was owed.`)) {
-      return;
-    }
+    const charge = await ask({
+      title: `Delete this ${amount} charge for ${name}?`,
+      message: "It disappears from your books, along with any income it recorded. This cannot be undone.",
+      note: "If they simply never paid, mark it unpaid instead — that keeps the record that it was owed.",
+      confirmLabel: "Delete the charge",
+      cancelLabel: "Keep it",
+      danger: true,
+    });
+    if (!charge.ok) return;
     await deletePayment(id);
     location.hash = "#/rent";
     render();
@@ -1362,15 +1601,18 @@ document.addEventListener("click", async (event) => {
 
     // The lease survives. It is the agreement every charge was made under, and
     // the other tenants are still on it.
-    if (!confirm(
-      `Take ${name} off the lease at ${property}?\n\n` +
-      (others > 0
-        ? `${others} other tenant${others === 1 ? " stays" : "s stay"} on it.`
-        : `The lease stays in your records with nobody on it, so its rent history keeps its terms.`) +
-      `\n\nThis does not remove ${name} or any rent they owe.`
-    )) {
-      return;
-    }
+    const off = await ask({
+      title: `Take ${name} off the lease at ${property}?`,
+      message:
+        (others > 0
+          ? `${others} other tenant${others === 1 ? " stays" : "s stay"} on it.`
+          : "The lease stays in your records with nobody on it, so its rent history keeps its terms.") +
+        ` This does not remove ${name} or any rent they owe.`,
+      confirmLabel: "Take them off",
+      cancelLabel: "Leave it",
+      danger: true,
+    });
+    if (!off.ok) return;
     await leaveLease(id, person);
     render();
     return;
@@ -1382,9 +1624,15 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "delete-rule") {
     const { id, name } = target.dataset;
-    if (!confirm(`Forget the rule for “${name}”?\n\nStatements will go back to being sorted by the built-in guesses. Anything already booked stays as it is.`)) {
-      return;
-    }
+    const rule = await ask({
+      title: `Forget the rule for “${name}”?`,
+      message:
+        "Statements will go back to being sorted by the built-in guesses. Anything already booked stays as it is.",
+      confirmLabel: "Forget it",
+      cancelLabel: "Keep it",
+      danger: true,
+    });
+    if (!rule.ok) return;
     await api.remove("vendor_rules", id);
     render();
     return;
@@ -1395,14 +1643,16 @@ document.addEventListener("click", async (event) => {
 
     // The account is a folder. Emptying the folder must not empty the books —
     // the expenses and payments booked from those statements stay.
-    if (!confirm(
-      `Remove ${name}?\n\n` +
-      (rows.length
+    const account = await ask({
+      title: `Remove ${name}?`,
+      message: rows.length
         ? `Its ${rows.length} imported row${rows.length === 1 ? "" : "s"} go with it, so a statement you have already brought in could be imported again. Everything already booked stays in your books.`
-        : `Nothing has been imported into it.`)
-    )) {
-      return;
-    }
+        : "Nothing has been imported into it.",
+      confirmLabel: "Remove it",
+      cancelLabel: "Keep it",
+      danger: true,
+    });
+    if (!account.ok) return;
     for (const row of rows) await api.remove("bank_imports", row.id);
     await api.remove("bank_accounts", id);
     location.hash = "#/bank";
@@ -1676,12 +1926,19 @@ document.addEventListener("submit", async (event) => {
     status.textContent = "Booking…";
     try {
       const result = await bookStatement(data);
-      location.hash = "#/money";
+      const points = [
+        { label: `${result.payments} tenant payment${result.payments === 1 ? "" : "s"} ticked off`, href: "#/rent", action: "See rent" },
+        { label: `${result.bills} bill${result.bills === 1 ? "" : "s"} booked`, href: "#/money", action: "See the money" },
+      ];
+      if (result.learned) points.push({ label: `${result.learned} new vendor rule${result.learned === 1 ? "" : "s"} remembered`, href: "#/bank", action: "See rules" });
+      const done = await tell({
+        title: `Booked ${result.total} row${result.total === 1 ? "" : "s"}`,
+        message: "They are in your books now, and this statement will not import twice.",
+        points,
+        closeLabel: "Done",
+      });
+      location.hash = done.go || "#/money";
       render();
-      setTimeout(
-        () => alert(`Booked ${result.total} row${result.total === 1 ? "" : "s"}: ${result.payments} tenant payment${result.payments === 1 ? "" : "s"} and ${result.bills} bill${result.bills === 1 ? "" : "s"}.`),
-        150
-      );
     } catch (error) {
       button.disabled = false;
       status.textContent = error.message;

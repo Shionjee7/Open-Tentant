@@ -5,4 +5,4 @@
  * is what the running app shows. `npm run bump` writes both at once so they can
  * never disagree, and `npm run version:check` fails if they ever do.
  */
-export const VERSION = "1.1.1";
+export const VERSION = "1.1.2";
