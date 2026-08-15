@@ -10,6 +10,16 @@
 import * as api from "./api.js";
 import { esc, money, moneyExact, monthLabel, monthKey, monthlyLedger, shortDate, sumBy, titleCase } from "./lib.js";
 import { renderMonths } from "./months.js";
+import {
+  personTies,
+  propertyForm,
+  removePerson,
+  rentForm,
+  saveProperty,
+  saveTenant,
+  scheduleRent,
+  tenantForm,
+} from "./forms.js";
 
 const NAV = [
   { href: "#/", label: "Home", icon: "▦", hint: "This month at a glance" },
@@ -40,6 +50,8 @@ function routeParams() {
 /** The menu entry a page belongs to, so a sub-page still lights one up. */
 function navFor(route) {
   if (route.startsWith("/property/")) return NAV.find((i) => i.href === "#/properties");
+  if (route.startsWith("/tenant/")) return NAV.find((i) => i.href === "#/tenants");
+  if (route.startsWith("/rent/")) return NAV.find((i) => i.href === "#/rent");
   return NAV.find((item) => item.href === `#${route}`) ?? NAV[0];
 }
 
@@ -261,46 +273,83 @@ async function screenMoney() {
 }
 
 async function screenRent() {
-  const [payments, people, properties] = await Promise.all([
+  const [payments, people, properties, leases] = await Promise.all([
     api.list("payments", { sort: "due_date" }),
     api.list("people"),
     api.list("properties"),
+    api.list("leases"),
   ]);
-  const nameOf = new Map(people.map((p) => [p.id, `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim()]));
-  const month = monthKey();
-  const due = payments.filter((p) => String(p.due_date ?? "").slice(0, 7) === month);
-  const paid = due.filter((p) => p.status === "paid");
+
+  const live = properties.filter((p) => !p.archived);
+  const chosen = routeParams().get("property") || "";
+  const month = routeParams().get("month") || monthKey();
+  const propertyOf = new Map(leases.map((l) => [l.id, l.property]));
+  const personHome = new Map(people.map((p) => [p.id, p.property]));
+  const person = new Map(people.map((p) => [p.id, p]));
+
+  const houseOf = (charge) =>
+    (charge.lease && propertyOf.get(charge.lease)) || personHome.get(charge.person) || "";
+
+  const inMonth = payments.filter((c) => String(c.due_date ?? "").slice(0, 7) === month);
+  const rows = chosen ? inMonth.filter((c) => houseOf(c) === chosen) : inMonth;
+  const paid = rows.filter((c) => c.status === "paid");
+  const owed = rows.filter((c) => c.status !== "paid");
+
+  const picker = `
+    <form data-form="rent-filter" class="card card-body" style="display:flex;flex-wrap:wrap;gap:.85rem;align-items:flex-end;margin-bottom:1.25rem">
+      <div class="field" style="margin:0;min-width:14rem;flex:1">
+        <label for="f-house">Property</label>
+        <select id="f-house" name="property">
+          <option value="">All properties</option>
+          ${live.map((p) => `<option value="${esc(p.id)}"${p.id === chosen ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field" style="margin:0">
+        <label for="f-month">Month</label>
+        <input id="f-month" name="month" type="month" value="${esc(month)}" />
+      </div>
+      <button class="btn-secondary" type="submit">Show</button>
+    </form>`;
+
+  const heading = chosen ? live.find((p) => p.id === chosen)?.name ?? "Property" : "All properties";
 
   return (
-    head("Rent", "Who has paid and who hasn't") +
+    head(
+      "Rent",
+      "Pick a house, see who owes what",
+      `<a class="btn" href="#/rent/new">+ Schedule rent</a>`
+    ) +
+    picker +
     `<div class="grid grid-2 grid-md-4" style="margin-bottom:1.25rem">
-      ${stat("Due this month", money(sumBy(due, (p) => p.amount)))}
-      ${stat("Received", money(sumBy(paid, (p) => p.amount)), "", "good")}
-      ${stat("Still owed", money(sumBy(due.filter((p) => p.status !== "paid"), (p) => p.amount)), "", "bad")}
-      ${stat("Ticked off", `${paid.length}/${due.length}`)}
-    </div>
-    <section class="card">
-      <div class="card-head"><h2>${esc(monthLabel(month))} — every charge</h2></div>
-      ${due.length === 0
-        ? `<p class="empty">Nothing scheduled for this month.</p>`
-        : `<ul class="rows">${due
-            .map(
-              (p) => `
+      ${stat("Rent due", money(sumBy(rows, (c) => c.amount)), `${esc(heading)}, ${esc(monthLabel(month))}`)}
+      ${stat("Received", money(sumBy(paid, (c) => c.amount)), `${paid.length} of ${rows.length}`, "good")}
+      ${stat("Still owed", money(sumBy(owed, (c) => c.amount)), `${owed.length} charge${owed.length === 1 ? "" : "s"}`, owed.length ? "bad" : "")}
+      ${stat("People", new Set(rows.map((c) => c.person)).size)}
+    </div>` +
+    (rows.length === 0
+      ? `<div class="card empty">Nothing scheduled for ${esc(monthLabel(month))}${chosen ? " at this property" : ""}.</div>`
+      : `<section class="card"><ul class="rows">${rows
+          .map((c) => {
+            const who = person.get(c.person);
+            const name = who ? `${who.first_name ?? ""} ${who.last_name ?? ""}`.trim() : "Unassigned";
+            const home = live.find((p) => p.id === houseOf(c));
+            return `
             <li>
-              <div>
-                <div class="t">${esc(nameOf.get(p.person) || "Unassigned")} · ${esc(moneyExact(p.amount))}</div>
-                <div class="s">${esc(titleCase(p.type || "rent"))} · due ${esc(shortDate(p.due_date))}</div>
+              <div style="min-width:0">
+                ${who
+                  ? `<a class="t" href="#/tenant/${esc(who.id)}" style="color:var(--brand-700)">${esc(name)} →</a>`
+                  : `<div class="t">${esc(name)}</div>`}
+                <div class="s">${who?.email ? esc(who.email) : "No email"}${home ? ` · ${esc(home.name)}` : ""}</div>
+                <div class="s">${esc(titleCase(c.type || "rent"))} · due ${esc(shortDate(c.due_date))}</div>
               </div>
               <div style="display:flex;align-items:center;gap:.6rem">
-                <span class="tag ${p.status === "paid" ? "good" : "bad"}">${esc(titleCase(p.status))}</span>
-                ${p.status !== "paid"
-                  ? `<button class="btn" data-action="mark-paid" data-id="${esc(p.id)}">Mark paid</button>`
-                  : ""}
+                <span style="font-weight:600">${esc(moneyExact(c.amount))}</span>
+                <span class="tag ${c.status === "paid" ? "good" : "bad"}">${esc(titleCase(c.status))}</span>
+                ${c.status !== "paid" ? `<button class="btn" data-action="mark-paid" data-id="${esc(c.id)}">Mark paid</button>` : ""}
               </div>
-            </li>`
-            )
-            .join("")}</ul>`}
-    </section>`
+            </li>`;
+          })
+          .join("")}</ul></section>`)
   );
 }
 
@@ -335,7 +384,7 @@ async function screenProperties() {
     head(
       "Properties",
       "Your places and the rooms in them",
-      `<button class="btn" data-action="add-property">+ Add property</button>`
+      `<a class="btn" href="#/property/new">+ Add property</a>`
     ) +
     (properties.length === 0
       ? `<div class="card empty">No properties yet. Add the first one to get started.</div>`
@@ -386,10 +435,13 @@ async function screenProperty() {
   if (!property) return head("Not found", "") + `<div class="card empty">That property no longer exists.</div>`;
 
   const rooms = units.filter((u) => u.property === id);
-  const residents = people.filter((p) => p.property === id && p.stage !== "past");
+  const ours = people.filter((p) => p.property === id);
+  const residents = ours.filter((p) => p.stage !== "past");
   const ourLeases = leases.filter((l) => l.property === id);
   const leaseIds = new Set(ourLeases.map((l) => l.id));
-  const personIds = new Set(residents.map((p) => p.id));
+  // Everyone who has ever been at this house, not only whoever is here now —
+  // last year's tenant moving out must not take last year's rent with them.
+  const personIds = new Set(ours.map((p) => p.id));
   // A charge belongs to this house if its lease does, or failing that, if the
   // person it is for lives here.
   const charges = payments
@@ -405,8 +457,10 @@ async function screenProperty() {
   const owed = charges.filter((c) => c.status !== "paid");
   const kept = sumBy(income, (t) => t.amount) - sumBy(costs, (t) => t.amount);
 
+  const byRoom = property.rental_type === "by_room" || rooms.length > 0;
   const TABS = [
     ["overview", "Overview"],
+    ...(byRoom ? [["rooms", `Rooms (${rooms.length})`]] : []),
     ["rent", `Rent (${charges.length})`],
     ["people", `People (${residents.length})`],
     ["costs", `Expenses (${costs.length})`],
@@ -446,6 +500,65 @@ async function screenProperty() {
           </p>
         </div>
       </section>`;
+  }
+
+  if (tab === "rooms") {
+    // Rooms are edited in place. A five-bedroom house means five rents that
+    // drift apart over time, and making each one a separate page to visit is
+    // how they end up never being updated.
+    const takenBy = new Map(
+      people.filter((p) => p.unit && p.stage !== "past").map((p) => [p.unit, p])
+    );
+    const full = sumBy(rooms, (r) => r.rent);
+    const now = sumBy(rooms.filter((r) => takenBy.has(r.id)), (r) => r.rent);
+
+    body = rooms.length === 0
+      ? `<div class="card empty">No rooms yet. <a href="#/property/${esc(id)}/edit" style="color:var(--brand-600)">Add some →</a></div>`
+      : `<div class="grid grid-2 grid-md-4" style="margin-bottom:1.25rem">
+          ${stat("Rooms", rooms.length, `${takenBy.size} filled`)}
+          ${stat("Coming in now", money(now), "rooms with someone in them", "good")}
+          ${stat("If every room fills", money(full), "per month")}
+          ${stat("Empty", rooms.length - takenBy.size, money(full - now) + " not earning", full - now > 0 ? "bad" : "")}
+        </div>
+        <section class="card">
+          <div class="roomlist">
+            <div class="roomhead">
+              <span>Room</span><span>Rent</span><span>Who's in it</span><span></span>
+            </div>
+            ${rooms
+              .map((room) => {
+                const who = takenBy.get(room.id);
+                const name = who ? `${who.first_name ?? ""} ${who.last_name ?? ""}`.trim() : "";
+                return `
+              <form class="room" data-form="room" data-id="${esc(room.id)}">
+                <div>
+                  <label for="r-name-${esc(room.id)}">Room</label>
+                  <input id="r-name-${esc(room.id)}" name="name" value="${esc(room.name)}" required />
+                </div>
+                <div>
+                  <label for="r-rent-${esc(room.id)}">Rent ($)</label>
+                  <input id="r-rent-${esc(room.id)}" name="rent" type="number" min="0" step="0.01" value="${esc(room.rent || "")}" />
+                </div>
+                <div class="who">
+                  ${who
+                    ? `<a href="#/tenant/${esc(who.id)}" style="color:var(--brand-600)">${esc(name)} →</a>`
+                    : `<span class="muted">Empty</span>`}
+                  <span data-role="status" class="muted small"></span>
+                </div>
+                <div class="acts">
+                  <button class="btn-secondary" type="submit">Save</button>
+                  <button type="button" class="btn-secondary" data-action="delete-room"
+                    data-id="${esc(room.id)}" data-name="${esc(room.name)}" data-who="${esc(name)}"
+                    style="color:var(--out);border-color:#f3c7c0">Remove</button>
+                </div>
+              </form>`;
+              })
+              .join("")}
+          </div>
+        </section>
+        <p class="small muted" style="margin-top:.75rem">
+          Add more rooms from <a href="#/property/${esc(id)}/edit" style="color:var(--brand-600)">Edit</a>.
+        </p>`;
   }
 
   if (tab === "rent") {
@@ -551,7 +664,11 @@ async function screenProperty() {
 
   return (
     `<a href="#/properties" class="small" style="color:var(--brand-600);display:inline-block;margin-bottom:.75rem">← Properties</a>` +
-    head(property.name, [property.address, property.city].filter(Boolean).join(", ")) +
+    head(
+      property.name,
+      [property.address, property.city].filter(Boolean).join(", "),
+      `<a class="btn-secondary" href="#/property/${esc(id)}/edit">Edit</a>`
+    ) +
     tabBar +
     body
   );
@@ -560,10 +677,34 @@ async function screenProperty() {
 async function screenTenants() {
   const [people, properties] = await Promise.all([api.list("people"), api.list("properties")]);
   const propertyName = new Map(properties.map((p) => [p.id, p.name]));
-  const tenants = people.filter((p) => p.stage === "tenant");
+  const showRemoved = routeParams().get("removed") === "1";
+  const removed = people.filter((p) => p.archived);
+  const tenants = showRemoved ? removed : people.filter((p) => !p.archived);
+  const nameOf = (p) => `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
+
+  if (showRemoved) {
+    return (
+      `<a href="#/tenants" class="small" style="color:var(--brand-600);display:inline-block;margin-bottom:.75rem">← Tenants</a>` +
+      head("Removed people", "Their rent history is still in your books. Put one back any time.") +
+      (removed.length === 0
+        ? `<div class="card empty">Nobody removed.</div>`
+        : `<section class="card"><ul class="rows">${removed
+            .map(
+              (p) => `
+            <li>
+              <div>
+                <div class="t">${esc(nameOf(p))}</div>
+                <div class="s">${esc(p.email || "No email")}</div>
+              </div>
+              <button class="btn-secondary" data-action="restore-tenant" data-id="${esc(p.id)}">Put back</button>
+            </li>`
+            )
+            .join("")}</ul></section>`)
+    );
+  }
 
   return (
-    head("Tenants", "Who lives where") +
+    head("Tenants", "Who lives where", `<a class="btn" href="#/tenant/new">+ Add person</a>`) +
     hub([
       { href: "#/rent", label: "Rent", detail: "What each tenant owes this month" },
       { href: "#/repairs", label: "Repairs", detail: "What they've reported" },
@@ -574,14 +715,17 @@ async function screenTenants() {
           .map(
             (p) => `
           <li>
-            <div>
-              <div class="t">${esc(`${p.first_name ?? ""} ${p.last_name ?? ""}`.trim())}</div>
+            <a href="#/tenant/${esc(p.id)}" style="flex:1;min-width:0">
+              <div class="t">${esc(nameOf(p))} <span class="muted small">→</span></div>
               <div class="s">${esc(p.email || "No email")}${p.property ? ` · ${esc(propertyName.get(p.property) || "")}` : ""}</div>
-            </div>
-            <span class="tag good">Tenant</span>
+            </a>
+            <span class="tag ${p.stage === "tenant" ? "good" : ""}">${esc(titleCase(p.stage === "past" ? "past tenant" : p.stage))}</span>
           </li>`
           )
-          .join("")}</ul></section>`)
+          .join("")}</ul></section>`) +
+    (removed.length > 0
+      ? `<p class="small" style="margin-top:1rem"><a href="#/tenants?removed=1" style="color:var(--brand-600)">Show removed (${removed.length})</a></p>`
+      : "")
   );
 }
 
@@ -703,16 +847,56 @@ async function render() {
   }
 
   const route = currentRoute();
-  const screen = route.startsWith("/property/") ? screenProperty : ROUTES[route] ?? screenHome;
+  let screen = ROUTES[route] ?? screenHome;
+  if (route === "/property/new") screen = () => propertyForm(null);
+  else if (/^\/property\/[^/]+\/edit$/.test(route)) screen = () => propertyForm(route.split("/")[2]);
+  else if (route.startsWith("/property/")) screen = screenProperty;
+  else if (route === "/tenant/new") screen = () => tenantForm(null);
+  else if (route.startsWith("/tenant/")) screen = () => tenantForm(route.split("/")[2]);
+  else if (route === "/rent/new") screen = rentForm;
   app.innerHTML = shell(`<div class="empty">Loading…</div>`);
   try {
     const html = await screen();
     app.innerHTML = shell(html);
+    syncForms();
   } catch (error) {
     app.innerHTML = shell(
       `<div class="card card-body"><h2>Something went wrong</h2>
        <p class="sub muted" style="margin-top:.35rem">${esc(error.message)}</p></div>`
     );
+  }
+}
+
+/**
+ * The parts of a form that depend on another answer.
+ *
+ * Asking "how many rooms?" of somebody renting out a whole house is noise, and
+ * offering the rooms of a house they didn't pick is worse than noise — it files
+ * a tenant into a bedroom in the wrong building. Both are decided here, once
+ * after every render and again whenever the answer changes.
+ */
+function syncForms() {
+  const picked = document.querySelector('input[name="rental_type"]:checked');
+  if (picked) {
+    for (const block of document.querySelectorAll("[data-when]")) {
+      block.hidden = block.dataset.when !== picked.value;
+    }
+  }
+
+  const property = document.querySelector('[data-role="property-picker"]');
+  const rooms = document.getElementById("f-unit");
+  if (property && rooms) {
+    let available = 0;
+    for (const option of rooms.options) {
+      if (!option.value) continue;
+      const mine = option.dataset.property === property.value;
+      option.hidden = !mine;
+      option.disabled = !mine;
+      if (mine) available++;
+    }
+    // A room from the house they just moved away from is not their room.
+    if (rooms.selectedOptions[0]?.disabled) rooms.value = "";
+    rooms.closest('[data-role="room-field"]').hidden = available === 0;
   }
 }
 
@@ -792,16 +976,59 @@ document.addEventListener("click", async (event) => {
     render();
     return;
   }
-  if (action === "add-property") {
-    const name = prompt("What do you call this property?");
-    if (!name) return;
-    await api.create("properties", {
-      name,
-      status: "vacant",
-      rental_type: "whole",
-      listed: false,
-    });
+  if (action === "delete-tenant") {
+    const { id, name } = target.dataset;
+    target.disabled = true;
+    const ties = await personTies(id);
+
+    // Two different questions, because they have two different answers. Nothing
+    // is attached: they really do disappear, and the question says so. Something
+    // is attached: they come off the list and the money stays, and the question
+    // says that instead. Neither one lies about what the button does.
+    const question =
+      ties.total === 0
+        ? `Delete ${name}?\n\nThey have no rent, leases or repairs on file, so this removes them completely. It cannot be undone.`
+        : `Remove ${name}?\n\nThey come off your tenant list. Their rent history stays in your books` +
+          `${ties.leases ? ", and so do their leases" : ""}, and you can put them back from "Show removed".`;
+
+    if (!confirm(question)) {
+      target.disabled = false;
+      return;
+    }
+
+    await removePerson(id, ties);
+    location.hash = "#/tenants";
     render();
+    return;
+  }
+  if (action === "delete-room") {
+    const { id, name, who } = target.dataset;
+    if (who) {
+      alert(`${who} is living in ${name}.\n\nMove them to another room, or off the property, before removing it.`);
+      return;
+    }
+    if (!confirm(`Remove ${name}?\n\nThe room goes for good. Rent already charged against it stays in your books.`)) {
+      return;
+    }
+    await api.remove("units", id);
+    render();
+    return;
+  }
+  if (action === "restore-tenant") {
+    await api.update("people", target.dataset.id, { archived: false });
+    render();
+    return;
+  }
+});
+
+// Conditional bits of a form react as soon as the answer changes, not on save.
+document.addEventListener("change", (event) => {
+  if (event.target.matches('input[name="rental_type"], [data-role="property-picker"]')) {
+    syncForms();
+  }
+  // Picking a house on the rent screen should just show that house.
+  if (event.target.closest('[data-form="rent-filter"]')) {
+    event.target.form.requestSubmit();
   }
 });
 
@@ -834,6 +1061,67 @@ document.addEventListener("submit", async (event) => {
       amount: Number(data.amount) || 0,
       description: data.description || titleCase(data.category || "expense"),
     });
+    render();
+    return;
+  }
+
+  if (form.dataset.form === "property") {
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-role="status"]');
+    button.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      const property = await saveProperty(form.dataset.id || null, data);
+      location.hash = `#/property/${property.id}`;
+      render();
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = error.message;
+    }
+    return;
+  }
+
+  if (form.dataset.form === "tenant") {
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-role="status"]');
+    button.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      await saveTenant(form.dataset.id || null, data);
+      location.hash = "#/tenants";
+      render();
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = error.message;
+    }
+    return;
+  }
+
+  if (form.dataset.form === "rent") {
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    await scheduleRent(data);
+    location.hash = "#/rent";
+    render();
+    return;
+  }
+
+  if (form.dataset.form === "room") {
+    const status = form.querySelector('[data-role="status"]');
+    status.textContent = " · Saving…";
+    await api.update("units", form.dataset.id, {
+      name: data.name,
+      rent: Number(data.rent) || 0,
+    });
+    status.textContent = " · Saved";
+    return;
+  }
+
+  if (form.dataset.form === "rent-filter") {
+    const query = new URLSearchParams();
+    if (data.property) query.set("property", String(data.property));
+    if (data.month) query.set("month", String(data.month));
+    location.hash = `#/rent${query.toString() ? `?${query}` : ""}`;
     render();
     return;
   }

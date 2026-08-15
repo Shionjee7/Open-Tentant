@@ -164,6 +164,10 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
   box-shadow: var(--shadow);
 }
 .card + .card { margin-top: 1.25rem; }
+/* Stacked cards need that gap. Cards side by side in a grid already have one,
+   and the margin drops every card but the first, so a row of four figures sits
+   on two different baselines. */
+.grid > .card + .card { margin-top: 0; }
 .card-head { padding: 1rem 1.25rem; border-bottom: 1px solid var(--line-soft); }
 .card-body { padding: 1.25rem; }
 
@@ -260,6 +264,32 @@ input, select, textarea {
 }
 input:focus, select:focus, textarea:focus { border-color: var(--brand-500); outline: 2px solid rgb(47 111 237 / 0.25); outline-offset: 0; }
 .field + .field { margin-top: 0.85rem; }
+/* Stacked fields need that gap; fields side by side in a grid already have one,
+   and the margin would drop the right-hand field half a line lower than its
+   neighbour. */
+.grid > .field + .field { margin-top: 0; }
+[hidden] { display: none !important; }
+
+/* Radio cards: "the whole place" or "by the room". Big targets, and the one
+   you picked is obvious without reading — a radio dot alone is not. */
+.choices { display: grid; gap: 0.6rem; }
+@media (min-width: 640px) { .choices { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.choice {
+  display: flex; gap: 0.6rem; align-items: flex-start;
+  margin: 0; padding: 0.8rem 0.9rem;
+  border: 1px solid #cbd5e1; border-radius: var(--radius);
+  background: #fff; cursor: pointer;
+  font: inherit; font-size: 0.9rem; font-weight: 400;
+  letter-spacing: normal; text-transform: none; color: var(--ink-900);
+}
+.choice:hover { border-color: var(--brand-300); }
+.choice input { width: auto; margin: 0.15rem 0 0; flex-shrink: 0; accent-color: var(--brand-600); }
+.choice strong { display: block; font-weight: 600; }
+.choice .small { display: block; margin-top: 0.1rem; }
+.choice:has(input:checked) {
+  border-color: var(--brand-500); background: var(--brand-50);
+  box-shadow: inset 0 0 0 1px var(--brand-500);
+}
 
 /* Sign in */
 .signin { display: grid; place-items: center; min-height: 100vh; padding: 1.5rem; }
@@ -281,6 +311,42 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand-500); outl
 .steps .n { display: flex; height: 1.75rem; width: 1.75rem; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 999px; background: #f1f5f9; font-size: 0.85rem; font-weight: 600; }
 .steps .t { font-weight: 500; }
 .steps .s { font-size: 0.85rem; color: var(--ink-500); }
+
+/* Rooms, edited where they are listed.
+   Narrow: each room is a small stacked form with its own labels. Wide: the
+   labels move to one header row, because reading "ROOM / RENT" six times down
+   a page is noise, not guidance. */
+.roomlist { display: flex; flex-direction: column; }
+.roomhead { display: none; }
+.room {
+  display: grid; gap: 0.6rem 0.9rem;
+  padding: 0.9rem 1.25rem;
+  border-top: 1px solid var(--line-soft);
+}
+.roomlist > .room:first-of-type { border-top: 0; }
+.room .who { font-size: 0.85rem; align-self: center; }
+.room .acts { display: flex; gap: 0.5rem; }
+
+@media (min-width: 860px) {
+  .roomhead {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 8rem minmax(0, 1fr) auto;
+    gap: 0.9rem;
+    padding: 0.75rem 1.25rem 0.5rem;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--ink-500);
+  }
+  .room {
+    grid-template-columns: minmax(0, 1fr) 8rem minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .roomlist > .room:first-of-type { border-top: 0; }
+  .room label {
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
 
 /* Tabs inside one property */
 .tabs { display: flex; gap: 0.25rem; overflow-x: auto; border-bottom: 1px solid var(--line); margin-bottom: 1.25rem; }
