@@ -31,7 +31,15 @@ function currentRoute() {
   return hash.split("?")[0].replace(/\/$/, "") || "/";
 }
 
+/** Anything after the "?" in the hash, e.g. #/property/abc?tab=rent. */
+function routeParams() {
+  const hash = location.hash.replace(/^#/, "");
+  return new URLSearchParams(hash.split("?")[1] || "");
+}
+
+/** The menu entry a page belongs to, so a sub-page still lights one up. */
 function navFor(route) {
+  if (route.startsWith("/property/")) return NAV.find((i) => i.href === "#/properties");
   return NAV.find((item) => item.href === `#${route}`) ?? NAV[0];
 }
 
@@ -297,7 +305,31 @@ async function screenRent() {
 }
 
 async function screenProperties() {
-  const [properties, units] = await Promise.all([api.list("properties"), api.list("units")]);
+  const [all, units] = await Promise.all([api.list("properties"), api.list("units")]);
+  const showRemoved = routeParams().get("removed") === "1";
+  const removed = all.filter((p) => p.archived);
+  const properties = showRemoved ? removed : all.filter((p) => !p.archived);
+
+  if (showRemoved) {
+    return (
+      `<a href="#/properties" class="small" style="color:var(--brand-600);display:inline-block;margin-bottom:.75rem">← Properties</a>` +
+      head("Removed properties", "Their history is still in your books. Put one back any time.") +
+      (removed.length === 0
+        ? `<div class="card empty">Nothing removed.</div>`
+        : `<section class="card"><ul class="rows">${removed
+            .map(
+              (p) => `
+            <li>
+              <div>
+                <div class="t">${esc(p.name)}</div>
+                <div class="s">${esc([p.address, p.city].filter(Boolean).join(", ") || "No address")}</div>
+              </div>
+              <button class="btn-secondary" data-action="restore-property" data-id="${esc(p.id)}">Put back</button>
+            </li>`
+            )
+            .join("")}</ul></section>`)
+    );
+  }
 
   return (
     head(
@@ -313,17 +345,215 @@ async function screenProperties() {
             const filled = rooms.filter((u) => u.status === "occupied").length;
             return `
             <li>
-              <div>
-                <div class="t">${esc(p.name)}</div>
+              <a href="#/property/${esc(p.id)}" style="flex:1;min-width:0">
+                <div class="t">${esc(p.name)} <span class="muted small">→</span></div>
                 <div class="s">${esc([p.address, p.city, p.state].filter(Boolean).join(", ") || "No address")}</div>
-              </div>
+              </a>
               <div style="display:flex;align-items:center;gap:.6rem">
                 <span class="small muted">${rooms.length ? `${filled}/${rooms.length} rooms` : money(p.rent) + "/mo"}</span>
                 <span class="tag ${p.status === "occupied" ? "good" : ""}">${esc(titleCase(p.status || "vacant"))}</span>
               </div>
             </li>`;
           })
-          .join("")}</ul></section>`)
+          .join("")}</ul></section>`) +
+    (removed.length > 0
+      ? `<p class="small" style="margin-top:1rem"><a href="#/properties?removed=1" style="color:var(--brand-600)">Show removed (${removed.length})</a></p>`
+      : "")
+  );
+}
+
+/**
+ * One house, and everything that belongs to it.
+ *
+ * The alternative was what we had: a global rent list, a global tenant list, a
+ * global expense list, and you holding in your head which rows belonged to
+ * which house. Open the house instead and its rent, its people, its costs and
+ * its papers are all right there.
+ */
+async function screenProperty() {
+  const id = currentRoute().split("/")[2];
+  const tab = routeParams().get("tab") || "overview";
+
+  const [property, units, people, leases, payments, transactions, documents] = await Promise.all([
+    api.one("properties", id),
+    api.list("units"),
+    api.list("people"),
+    api.list("leases"),
+    api.list("payments"),
+    api.list("transactions"),
+    api.list("documents"),
+  ]);
+  if (!property) return head("Not found", "") + `<div class="card empty">That property no longer exists.</div>`;
+
+  const rooms = units.filter((u) => u.property === id);
+  const residents = people.filter((p) => p.property === id && p.stage !== "past");
+  const ourLeases = leases.filter((l) => l.property === id);
+  const leaseIds = new Set(ourLeases.map((l) => l.id));
+  const personIds = new Set(residents.map((p) => p.id));
+  // A charge belongs to this house if its lease does, or failing that, if the
+  // person it is for lives here.
+  const charges = payments
+    .filter((p) => (p.lease ? leaseIds.has(p.lease) : personIds.has(p.person)))
+    .sort((a, b) => String(b.due_date).localeCompare(String(a.due_date)));
+  const costs = transactions
+    .filter((t) => t.property === id && t.type === "expense")
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const income = transactions.filter((t) => t.property === id && t.type === "income");
+  const papers = documents.filter((d) => d.property === id);
+  const nameOf = new Map(people.map((p) => [p.id, `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim()]));
+
+  const owed = charges.filter((c) => c.status !== "paid");
+  const kept = sumBy(income, (t) => t.amount) - sumBy(costs, (t) => t.amount);
+
+  const TABS = [
+    ["overview", "Overview"],
+    ["rent", `Rent (${charges.length})`],
+    ["people", `People (${residents.length})`],
+    ["costs", `Expenses (${costs.length})`],
+    ["papers", `Documents (${papers.length})`],
+  ];
+
+  const tabBar = `<nav class="tabs">${TABS.map(
+    ([key, label]) =>
+      `<a href="#/property/${esc(id)}?tab=${key}"${key === tab ? ' aria-current="page"' : ""}>${esc(label)}</a>`
+  ).join("")}</nav>`;
+
+  let body = "";
+
+  if (tab === "overview") {
+    body = `
+      <div class="grid grid-2 grid-md-4" style="margin-bottom:1.25rem">
+        ${stat(rooms.length ? "Rooms" : "Rent", rooms.length ? `${rooms.filter((r) => r.status === "occupied").length}/${rooms.length}` : `${money(property.rent)}/mo`, rooms.length ? "filled" : "")}
+        ${stat("People here", residents.length)}
+        ${stat("Still owed", money(sumBy(owed, (c) => c.amount)), `${owed.length} charge${owed.length === 1 ? "" : "s"}`, owed.length ? "bad" : "")}
+        ${stat("Kept from this house", money(kept), "rent in, costs out", kept >= 0 ? "good" : "bad")}
+      </div>
+      <section class="card card-body">
+        <h2>Details</h2>
+        <div class="grid grid-sm-2" style="margin-top:.85rem">
+          <div><span class="hero-k">Address</span><div>${esc([property.address, property.city, property.state, property.zip].filter(Boolean).join(", ") || "—")}</div></div>
+          <div><span class="hero-k">Rented as</span><div>${property.rental_type === "by_room" ? "By the room" : "The whole place"}</div></div>
+        </div>
+        <div style="margin-top:1.25rem;border-top:1px solid var(--line-soft);padding-top:1rem">
+          <button class="btn-secondary" data-action="delete-property"
+            data-id="${esc(property.id)}" data-name="${esc(property.name)}"
+            data-people="${residents.length}" data-leases="${ourLeases.filter((l) => l.status === "active" || l.status === "sent" || l.status === "signed").length}">
+            Remove this property
+          </button>
+          <p class="small muted" style="margin-top:.5rem">
+            Asks first, and is refused while anyone still lives here. Removing takes it off
+            your list and keeps its history — you can put it back later.
+          </p>
+        </div>
+      </section>`;
+  }
+
+  if (tab === "rent") {
+    body = charges.length === 0
+      ? `<div class="card empty">No rent scheduled for this house yet.</div>`
+      : `<section class="card"><ul class="rows">${charges
+          .map(
+            (c) => `
+          <li>
+            <div>
+              <div class="t">${esc(nameOf.get(c.person) || "Unassigned")} · ${esc(moneyExact(c.amount))}</div>
+              <div class="s">${esc(titleCase(c.type || "rent"))} · due ${esc(shortDate(c.due_date))}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:.6rem">
+              <span class="tag ${c.status === "paid" ? "good" : "bad"}">${esc(titleCase(c.status))}</span>
+              ${c.status !== "paid" ? `<button class="btn" data-action="mark-paid" data-id="${esc(c.id)}">Mark paid</button>` : ""}
+            </div>
+          </li>`
+          )
+          .join("")}</ul></section>`;
+  }
+
+  if (tab === "people") {
+    body = residents.length === 0
+      ? `<div class="card empty">Nobody is living here yet.</div>`
+      : `<section class="card"><ul class="rows">${residents
+          .map((p) => {
+            const room = rooms.find((r) => r.id === p.unit);
+            return `
+            <li>
+              <div>
+                <div class="t">${esc(`${p.first_name ?? ""} ${p.last_name ?? ""}`.trim())}</div>
+                <div class="s">${esc(p.email || "No email")}${room ? ` · ${esc(room.name)}` : ""}</div>
+              </div>
+              <span class="tag ${p.stage === "tenant" ? "good" : ""}">${esc(titleCase(p.stage))}</span>
+            </li>`;
+          })
+          .join("")}</ul></section>`;
+  }
+
+  if (tab === "costs") {
+    body = `
+      <section class="card card-body" style="margin-bottom:1.25rem">
+        <h2>Add an expense for this house</h2>
+        <form data-form="expense" data-property="${esc(id)}" style="margin-top:.85rem">
+          <div class="grid grid-sm-2">
+            <div class="field" style="margin:0">
+              <label for="x-date">Date</label>
+              <input id="x-date" name="date" type="date" value="${new Date().toISOString().slice(0, 10)}" required />
+            </div>
+            <div class="field" style="margin:0">
+              <label for="x-category">Category</label>
+              <select id="x-category" name="category">
+                ${["repairs", "utilities", "insurance", "taxes", "mortgage", "turnover", "other"]
+                  .map((c) => `<option value="${c}">${titleCase(c)}</option>`)
+                  .join("")}
+              </select>
+            </div>
+            <div class="field" style="margin:0">
+              <label for="x-amount">Amount ($)</label>
+              <input id="x-amount" name="amount" type="number" min="0" step="0.01" required />
+            </div>
+            <div class="field" style="margin:0">
+              <label for="x-description">What was it?</label>
+              <input id="x-description" name="description" placeholder="Electric bill" />
+            </div>
+          </div>
+          <button class="btn" type="submit" style="margin-top:.85rem">Add expense</button>
+        </form>
+      </section>
+      ${costs.length === 0
+        ? `<div class="card empty">Nothing spent on this house yet.</div>`
+        : `<section class="card"><ul class="rows">${costs
+            .map(
+              (t) => `
+            <li>
+              <div>
+                <div class="t">${esc(t.description || titleCase(t.category))}</div>
+                <div class="s">${esc(titleCase(t.category))} · ${esc(shortDate(t.date))}</div>
+              </div>
+              <span style="font-weight:600;color:var(--out)">−${esc(moneyExact(t.amount))}</span>
+            </li>`
+            )
+            .join("")}</ul></section>`}`;
+  }
+
+  if (tab === "papers") {
+    body = papers.length === 0
+      ? `<div class="card empty">No documents filed against this house yet.</div>`
+      : `<section class="card"><ul class="rows">${papers
+          .map(
+            (d) => `
+          <li>
+            <div>
+              <div class="t">${esc(d.name)}</div>
+              <div class="s">${esc(titleCase(d.type || "document"))} · ${esc(shortDate(d.created))}</div>
+            </div>
+            <span class="tag ${d.status === "signed" ? "good" : ""}">${esc(titleCase(d.status || "draft"))}</span>
+          </li>`
+          )
+          .join("")}</ul></section>`;
+  }
+
+  return (
+    `<a href="#/properties" class="small" style="color:var(--brand-600);display:inline-block;margin-bottom:.75rem">← Properties</a>` +
+    head(property.name, [property.address, property.city].filter(Boolean).join(", ")) +
+    tabBar +
+    body
   );
 }
 
@@ -472,7 +702,8 @@ async function render() {
     return;
   }
 
-  const screen = ROUTES[currentRoute()] ?? screenHome;
+  const route = currentRoute();
+  const screen = route.startsWith("/property/") ? screenProperty : ROUTES[route] ?? screenHome;
   app.innerHTML = shell(`<div class="empty">Loading…</div>`);
   try {
     const html = await screen();
@@ -526,6 +757,41 @@ document.addEventListener("click", async (event) => {
     render();
     return;
   }
+  if (action === "delete-property") {
+    const { id, name } = target.dataset;
+    const people = Number(target.dataset.people) || 0;
+    const leases = Number(target.dataset.leases) || 0;
+
+    // Refuse while the house is in use — deleting it would strand the people
+    // and the lease that point at it.
+    if (people > 0) {
+      alert(`${name} still has ${people} ${people === 1 ? "person" : "people"} living there.\n\nMove them out first, then you can remove the property.`);
+      return;
+    }
+    if (leases > 0) {
+      alert(`${name} still has ${leases} active lease${leases === 1 ? "" : "s"}.\n\nEnd the lease first, then you can remove the property.`);
+      return;
+    }
+
+    // Name the property in the question, so a mis-click on the wrong row is
+    // obvious before anything happens.
+    if (!confirm(`Remove ${name}?\n\nIt comes off your list. Its rent history, expenses and documents stay in your books, and you can put it back from "Show removed".`)) {
+      return;
+    }
+
+    // Archived, not deleted. Leases and repairs hold a required reference to
+    // the property, so destroying it would either fail outright or take the
+    // history with it — and a landlord needs last year's numbers.
+    await api.update("properties", id, { archived: true });
+    location.hash = "#/properties";
+    render();
+    return;
+  }
+  if (action === "restore-property") {
+    await api.update("properties", target.dataset.id, { archived: false });
+    render();
+    return;
+  }
   if (action === "add-property") {
     const name = prompt("What do you call this property?");
     if (!name) return;
@@ -554,6 +820,21 @@ document.addEventListener("submit", async (event) => {
     } catch (error) {
       app.innerHTML = signInScreen(error.message);
     }
+    return;
+  }
+
+  if (form.dataset.form === "expense") {
+    const button = form.querySelector("button");
+    button.disabled = true;
+    await api.create("transactions", {
+      property: form.dataset.property,
+      date: data.date,
+      type: "expense",
+      category: data.category || "other",
+      amount: Number(data.amount) || 0,
+      description: data.description || titleCase(data.category || "expense"),
+    });
+    render();
     return;
   }
 
